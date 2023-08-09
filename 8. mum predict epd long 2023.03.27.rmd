@@ -1,0 +1,367 @@
+---
+title: "MuM_PreDiCT: EPD long"
+output: html_notebook
+---
+
+last updated: 2023.03.20 (Lisa Kent)
+
+This notebook:
+* reads in raw EPD table from database
+* Jan 2022 is most recent month with what looks like complete scanning, therefore exclude Feb2022 onwards (this will also remove the invalid dates) (We can later decide to remove Jan 2022 if we want complete years up to Dec 2021)
+* Jan 2010 is earliest "complete" month of scanning
+* saving long version of EPD linked to phenome conditions for use in later work packages
+
+
+
+
+```{r}
+if(!require(tidyverse)) install.packages("tidyverse")
+library(tidyverse)
+```
+
+__Lode odbc (Open Database Connectivity) package__
+```{r}
+library(odbc)
+```
+
+
+
+__Declare connection to database__
+```{r}
+con <- dbConnect(odbc::odbc(), "hirusql3", timeout = 10)
+```
+
+
+
+__Medications Data__
+```{r}
+epd_master <- dbGetQuery(con,"Select * from [HDRNIHBS_E062].[EPD_1]")
+```
+
+```{r}
+epd <- epd_master
+```
+
+
+```{r}
+colnames(epd)
+#some upper and some lower
+```
+```{r}
+colnames(epd) <- toupper(colnames(epd))
+```
+
+```{r}
+glimpse(epd)
+#there is trailing white space for some variables
+```
+
+
+```{r}
+epd <- epd %>% 
+  mutate(across(where(is.character), str_trim))
+
+glimpse(epd)
+```
+
+```{r}
+head(epd, 20)
+```
+```{r}
+#issue date reading in as character, change to date
+epd$ISSUE_DATE <- as.Date(epd$ISSUE_DATE)
+```
+
+```{r}
+sum(is.na(epd$ISSUE_DATE))
+epd %>% group_by(SCAN_YEAR, is.na(ISSUE_DATE)) %>% count() 
+
+# missing ISSUE_DATE only occurs in 2010.
+# all other years are complete
+```
+
+
+```{r}
+# issue date and scan date not always the same
+# issue date sometimes NA in 2010
+# need to use issue date when available, and coalesce with scan date when missing
+# first create a new variable with an imputed scan date being the first of month from SCAN_YEAR & SCAN_MONTH
+
+epd <- epd %>%
+  mutate(SCAN_DAY = "01") %>%
+  unite(SCAN_DATE,
+        c("SCAN_YEAR", "SCAN_MONTH", "SCAN_DAY"),
+        remove = F,
+        sep="-")
+
+head(epd)
+
+```
+
+```{r}
+epd$SCAN_DATE <- as.Date(epd$SCAN_DATE)
+
+head(epd)
+```
+
+
+```{r}
+epd <- epd %>%
+  mutate(ISSUE_DATE_NONMISS = coalesce(ISSUE_DATE, SCAN_DATE))
+
+sum(is.na(epd$ISSUE_DATE_NONMISS))
+epd %>% group_by(SCAN_YEAR, is.na(ISSUE_DATE_NONMISS)) %>% count() 
+#no longer any missing
+```
+
+__MEDICATIONS USED FOR PHENOTYPE DETECTION__
+
+```{r}
+# create new column with chapter, section and paragraph
+epd$BNF_CSP <- paste0(epd$BNF_CHAPTER, ".", epd$BNF_SECTION, ".", epd$BNF_PARAGRAPH)
+head(epd)
+```
+
+
+```{r}
+epd %>% group_by(BNF_CSP) %>% count()
+#manual inspection - seems reasonable
+```
+
+```{r}
+epd$VTM_NM <- tolower(epd$VTM_NM)
+epd$STRENGTH <- tolower(epd$STRENGTH)
+```
+
+
+__PHYSICAL PHENOTYPES__
+```{r}
+hypertension <- c("2.2.1", "2.6.2", "2.5.5", "2.5.4")
+peptic_ulcer <- c("1.3.1", "1.3.5")
+non_epilepsy <- c("gabapentin", "pregabalin", "topiramate")
+
+
+epd <- epd %>%
+  mutate(PHENO = 
+           case_when(
+             BNF_CSP %in% hypertension ~ "EPD_HYPERTENSION",
+             grepl("^13.4", BNF_CSP) ~ "EPD_ATOPIC_ECZEMA",
+             grepl("^13.5.2", BNF_CSP) ~ "EPD_PSORIASIS",
+             grepl("^12.2.1", BNF_CSP) ~ "EPD_ALLERGIC_RHINO",
+             grepl("^1.2", BNF_CSP) ~ "EPD_IRR_BOWEL_DIS",
+             BNF_CSP %in% peptic_ulcer ~ "EPD_PEPTIC_ULCER",
+             grepl("4.7.4", BNF_CSP) ~ "EPD_MIGRAINE",
+             grepl("^4.8.1", BNF_CSP) & !(VTM_NM %in% non_epilepsy) ~ "EPD_EPILEPSY",
+             BNF_CSP == "3.1.1" | grepl("^3.2", BNF_CSP) ~ "EPD_ASTHMA",
+             grepl("^6.1.1", BNF_CSP) ~ "EPD_T1DM",   #### Query=insulin will be prescribed not just to Type1, so will this capture too many people?
+             grepl("^6.1.2", BNF_CSP) & !(BNF_SUB_PARAGRAPH == "2") ~ "EPD_T2DM",
+             grepl("^6.2.2", BNF_CSP) ~ "EPD_HYPERTHYROIDISM",
+             grepl("^6.2.1", BNF_CSP) ~ "EPD_HYPOTHYROIDISM"
+             
+             )
+         )
+```
+
+```{r}
+#sanity check
+epd %>% 
+  filter(!is.na(PHENO)) %>%
+  group_by(BNF_CSP, BNF_SUB_PARAGRAPH)%>%
+  count() 
+
+epd %>% 
+  filter(!is.na(PHENO)) %>%
+  group_by(PHENO)%>%
+  count() 
+
+epd %>% 
+  filter(!is.na(PHENO)) %>%
+  head(100) 
+```
+
+
+
+__MENTAL HEALTH PHENOTYPES__
+```{r}
+#COMMON MENTAL HEALTH DISORDERS 
+#Depression/Anxiety (includes phobia, panic disorder, PTSD)
+epd <- epd %>%
+  mutate(
+    EPD_COMMON_MHD = if_else(
+      #BNF4.3 Antidepressants (excluding amitriptyline)
+      (grepl("^4.3", BNF_CSP) & !(grepl("amitriptyline", VTM_NM))) | 
+        #BNF4.1.2 Anxiolytics
+        BNF_CSP == "4.1.2" |
+        #Propranolol 10mg or 40mg
+       (grepl("propranolol", VTM_NM) & (STRENGTH %in% c("10mg", "40mg"))), 
+       1, 
+       0)
+       )
+
+```
+
+```{r}
+#sanity check
+epd %>% filter(EPD_COMMON_MHD == 1) %>% head(100)
+epd %>% group_by(EPD_COMMON_MHD) %>% count()
+```
+
+
+```{r}
+#Severe mental illness
+#Creating precurser variables for SMI prescription groups
+
+epd <- epd %>%
+  mutate(
+    EPD_SMI_GROUPA = if_else(
+      #BNF4.3 Antidepressants (excluding amitriptyline)
+      (grepl("^4.3", BNF_CSP) & !(grepl("amitriptyline", VTM_NM))) | 
+        #BNF4.1.2 Anxiolytics
+        BNF_CSP == "4.1.2", 
+       1, 
+       0)
+    ) %>%
+  mutate(
+    EPD_SMI_GROUPB = if_else(
+      #bnf4.2.1 antipsychotic drugs (excluding prochlorperazine)
+      BNF_CSP == "4.2.1" |
+        #bnf4.2.2 Antipsychotic depot injections
+        BNF_CSP == "4.2.2",
+      1,
+      0
+    )
+  ) %>%
+  mutate(
+    EPD_SMI_GROUPC = if_else(
+      #bnf4.2.3 drugs used for mania and hypomania (lithium, asenapine)
+      BNF_CSP == "4.2.3" & (grepl("^lithium", VTM_NM) | grepl("^asenapine", VTM_NM)),
+      1,
+      0
+    )
+  )
+
+
+#sanity check
+epd %>% filter(EPD_SMI_GROUPA == 1 | EPD_SMI_GROUPB == 1 | EPD_SMI_GROUPC == 1) %>% head(100)
+epd %>% group_by(EPD_SMI_GROUPA) %>% count()
+epd %>% group_by(EPD_SMI_GROUPB) %>% count()
+epd %>% group_by(EPD_SMI_GROUPC) %>% count()
+```
+
+
+```{r}
+#alcohol misuse / dependence
+epd <- epd %>%
+  mutate(
+    EPD_ALC_MISUSE_DEPEND = if_else(
+      #BNF4.10.1 alcohol dependence (acamprosate, disulfiram, nalmefene)
+      BNF_CSP == "4.10.1" & (grepl("^acamprosate", VTM_NM) | grepl("^disulfiram", VTM_NM) | grepl("^nalmefene", VTM_NM)), #no other names appear in NI EPD data anyway 
+       1, 
+       0)
+    )
+
+#sanity check
+epd %>% filter(EPD_ALC_MISUSE_DEPEND == 1) %>% head(100)
+epd %>% group_by(EPD_ALC_MISUSE_DEPEND) %>% count()
+epd %>% group_by(EPD_ALC_MISUSE_DEPEND) %>% summarise(COUNT = n_distinct(STUDY_ID))
+```
+
+```{r}
+#substance misuse / dependence
+
+###??? Query = methadone also appears under "analgesia" chapters, should these be excluded?
+
+epd <- epd %>%
+  mutate(
+    EPD_SUBSTANCE_MISUSE_DEPEND = if_else(
+      #methadone
+      (grepl("^methadone", VTM_NM)), 
+       1, 
+       0)
+    )
+
+#sanity check
+epd %>% filter(EPD_SUBSTANCE_MISUSE_DEPEND == 1) %>% head(100)
+epd %>% group_by(EPD_SUBSTANCE_MISUSE_DEPEND) %>% count()
+epd %>% group_by(EPD_SUBSTANCE_MISUSE_DEPEND) %>% summarise(COUNT = n_distinct(STUDY_ID))
+```
+
+
+```{r}
+# Neurodevelopmental disorder (ADHD, autism, learning difficulties)
+
+###??? Query = Lisdexamfetamine / Dexamfetamine also used for ADHD but not included in phenome definition
+# we miss cases  if we do not include this (although dexamfetamine also used for narcolepsy)
+epd <- epd %>%
+  mutate(
+    EPD_NEURODEV_DISORDER = if_else(
+      #methylphenidate
+      (grepl("^methylphenidate", VTM_NM) #| (grepl("amfetamine$", VTM_NM))
+       ), 
+       1, 
+       0)
+    )
+
+#sanity check
+epd %>% filter(EPD_NEURODEV_DISORDER == 1) %>% head(100)
+epd %>% group_by(EPD_NEURODEV_DISORDER) %>% count()
+epd %>% group_by(EPD_NEURODEV_DISORDER) %>% summarise(COUNT = n_distinct(STUDY_ID))
+```
+
+```{r}
+head(epd)
+```
+
+
+__SAVING LONG FORMATS TO CSV__
+```{r}
+epd_pheno_physical_long <- epd %>% select(STUDY_ID, ISSUE_DATE_NONMISS, PHENO, BNF_CSP)
+epd_pheno_physical_long <- epd_pheno_physical_long %>% filter(!is.na(PHENO))
+
+```
+
+```{r}
+write_csv(epd, file=paste0("S:/HBS_E062/3. DATA/epd_pheno_physical_long_all_vars_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+
+write_csv(epd_pheno_physical_long, file=paste0("S:/HBS_E062/3. DATA/epd_pheno_physical_long_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+
+#while in test phase, save to ARCHIVE
+#write_csv(epd, "S:/HBS_E062/3. DATA/ARCHIVE/epd_pheno_physical_long_all_vars.csv")
+#write_csv(epd_pheno_physical_long, "S:/HBS_E062/3. DATA/ARCHIVE/epd_pheno_physical_long.csv")
+```
+
+
+
+```{r}
+epd_pheno_mental_health_long <- epd %>% select(STUDY_ID, ISSUE_DATE_NONMISS, BNF_CSP, EPD_COMMON_MHD, EPD_SMI_GROUPA, EPD_SMI_GROUPB, EPD_SMI_GROUPC, EPD_ALC_MISUSE_DEPEND, EPD_SUBSTANCE_MISUSE_DEPEND, EPD_NEURODEV_DISORDER)
+
+#filter out any that have no mental health flags
+epd_pheno_mental_health_long <- epd_pheno_mental_health_long %>% filter(!((EPD_COMMON_MHD == 0) & (EPD_SMI_GROUPA== 0) & (EPD_SMI_GROUPB== 0) & (EPD_SMI_GROUPC== 0) & (EPD_ALC_MISUSE_DEPEND== 0) & (EPD_SUBSTANCE_MISUSE_DEPEND== 0) & (EPD_NEURODEV_DISORDER== 0)))
+
+```
+
+
+
+```{r}
+write_csv(epd_pheno_mental_health_long, file=paste0("S:/HBS_E062/3. DATA/epd_pheno_mental_health_long_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+#while in test phase, save to ARCHIVE
+#write_csv(epd_pheno_mental_health_long, "S:/HBS_E062/3. DATA/ARCHIVE/epd_pheno_mental_health_long.csv")
+```
+
+
+
+
+
+
+
+############################################################################
+#######                         REMINDERS/ TO DO                     #######
+############################################################################
+
+############################################################################
+
+
+
+######################################
+#######           END          #######
+######################################

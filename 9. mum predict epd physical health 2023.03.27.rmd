@@ -1,0 +1,712 @@
+---
+title: "MuM_PreDiCT: EPD Medications - Physical Health Conditions - Wide"
+output: html_notebook
+---
+
+last updated: 2023.06.07 (Lisa Kent)
+
+This notebook:
+* Operationalises the MuM-PreDiCT phenome definitions related to medications for physical conditions
+* Due to the scan rates of prescriptions in NI being less than 100% coverage, several definitions are compared (e.g. 4 vs 3 vs 2 prescriptions in any given 12mo period)
+
+
+
+
+```{r}
+if(!require(tidyverse)) install.packages("tidyverse")
+library(tidyverse)
+```
+
+__READ IN LONG FORMAT PHYSICAL PHENOTYPE__
+
+
+__READ IN NIMATS DATES__
+
+
+__JOIN PHYSICAL PHENOTYPE MEDS TO NIMATS DATES__
+```{r}
+nimats_dates$STUDY_ID <- as.numeric(nimats_dates$STUDY_ID)
+epd_pheno_physical_long$STUDY_ID <- as.numeric(epd_pheno_physical_long$STUDY_ID)
+nimats_epd_physical <- left_join(nimats_dates, epd_pheno_physical_long, by = "STUDY_ID", multiple = "all", relationship = "many-to-many")
+```
+
+
+
+__TIMING OF PRESCRIPTIONS__
+```{r}
+#sanity check
+nimats_epd_physical <- nimats_epd_physical %>% 
+  arrange(STUDY_ID, PREG_ID, PHENO, ISSUE_DATE_NONMISS)
+
+head(nimats_epd_physical, 100)
+```
+
+```{r}
+nimats_epd_physical <- nimats_epd_physical %>%
+  group_by(PREG_ID, PHENO) %>%
+  mutate(DATE_FOURTH_PRESC = lead(ISSUE_DATE_NONMISS,3))
+```
+
+```{r}
+nimats_epd_physical <- nimats_epd_physical %>%
+  group_by(PREG_ID, PHENO) %>%
+  mutate(DATE_THIRD_PRESC = lead(ISSUE_DATE_NONMISS,2))
+```
+
+```{r}
+nimats_epd_physical <- nimats_epd_physical %>%
+  group_by(PREG_ID, PHENO) %>%
+  mutate(DATE_SECOND_PRESC = lead(ISSUE_DATE_NONMISS,1))
+```
+
+
+```{r}
+#nb - this chunk slow to run
+library(lubridate)
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(FU_PERIOD_4PRESC = as.numeric(DATE_FOURTH_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(ANY_12MO_4PRESC = if_else(FU_PERIOD_4PRESC <=365 & FU_PERIOD_4PRESC >=0, 1, 0))%>%
+  
+  mutate(FU_PERIOD_3PRESC = as.numeric(DATE_THIRD_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(ANY_12MO_3PRESC = if_else(FU_PERIOD_3PRESC <=365 & FU_PERIOD_3PRESC >=0, 1, 0)) %>%
+  
+  mutate(FU_PERIOD_2PRESC = as.numeric(DATE_SECOND_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(ANY_12MO_2PRESC = if_else(FU_PERIOD_2PRESC <=365 & FU_PERIOD_2PRESC >=0, 1, 0)) %>%
+  mutate(ANY_6MO_2PRESC = if_else(FU_PERIOD_2PRESC <=183 & FU_PERIOD_2PRESC >=0, 1, 0))
+
+head(nimats_epd_physical, 100)
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(ANY_12MO_4PRESC) %>% count()
+nimats_epd_physical %>% group_by(ANY_12MO_3PRESC) %>% count()
+nimats_epd_physical %>% group_by(ANY_12MO_3PRESC) %>% count()
+nimats_epd_physical %>% group_by(ANY_6MO_2PRESC) %>% count()
+```
+
+
+```{r}
+#IDENTIFY IF PRESCRIPTION DISPENSED PRE-PREGNANCY
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(PRE_PREG_DISPENSE = ifelse(ISSUE_DATE_NONMISS <= LMP_CALC, 1, 0))
+
+head(nimats_epd_physical, 100)
+```
+
+
+```{r}
+#FLAG IF MEDICATION ISSUED AFTER AGE 11 
+#(NB - THIS CRITERIA ONLY APPLICABLE TO SOME PHENOTYPES)
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(PHENO_AGE11 = ifelse(ISSUE_DATE_NONMISS >= DATE_AGE11, 1, 0))
+
+head(nimats_epd_physical, 100)
+```
+
+
+```{r}
+library(lubridate)
+# FLAG IF ISSUE DATE WITHININ 12MONTHS PRE-PREGNANCY 
+#(NB - "ACTIVE" DEFINITION ONLY APPLICABLE TO SOME PHENOTYPES)
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(DATE_12MONTH = ymd(LMP_CALC) - years(1)) %>%
+  mutate(PHENO_12MONTH_PRE_PREG = ifelse(ISSUE_DATE_NONMISS >= DATE_12MONTH & ISSUE_DATE_NONMISS <= LMP_CALC, 1, 0))
+
+head(nimats_epd_physical, 100)
+```
+
+
+
+
+__TIME DEPENDENT PHYSICAL HEALTH FLAGS__
+```{r}
+#asthma=> script age11+, with at least 4 scripts in any 12 month period, and at least 1 script in 12months preceding pregnancy
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(EPD_ASTHMA_KEEP_4PRESC = if_else(
+    PHENO=="EPD_ASTHMA" & PHENO_AGE11==1 & ANY_12MO_4PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    #SCAN RATES OF PRESCRIPTIONS MAY BE LIMITING THE DETECTION RATE OF ASTHMA
+    #TO TEST IF DETECTION RATES CHANGE IF WE DROP THE 12 MONTH PRE-PREG CRITERIA
+    #asthma=> script age11+, with at least 4 scripts in any 12 month period
+    EPD_ASTHMA_KEEP_ALT = if_else(PHENO=="EPD_ASTHMA" & PHENO_AGE11==1 & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #asthma=> script age11+, with at least **3** scripts in any 12 month period, and at least 1 script in 12months preceding pregnancy
+    EPD_ASTHMA_KEEP_3PRESC = if_else(PHENO=="EPD_ASTHMA" & PHENO_AGE11==1 & ANY_12MO_3PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    
+    EPD_ASTHMA_KEEP_2PRESC = if_else(PHENO=="EPD_ASTHMA" & PHENO_AGE11==1 & ANY_12MO_2PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0)
+    )
+ 
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_ASTHMA_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ASTHMA_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_ASTHMA_KEEP_ALT == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ASTHMA_KEEP_ALT == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_ASTHMA_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ASTHMA_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_ASTHMA_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ASTHMA_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+```{r}
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    EPD_ATOPIC_ECZEMA_KEEP_4PRESC = if_else(PHENO=="EPD_ATOPIC_ECZEMA" & PHENO_AGE11==1 & ANY_12MO_4PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    EPD_ATOPIC_ECZEMA_KEEP_ALT = if_else(PHENO=="EPD_ATOPIC_ECZEMA" & PHENO_AGE11==1 & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    EPD_ATOPIC_ECZEMA_KEEP_3PRESC = if_else(PHENO=="EPD_ATOPIC_ECZEMA" & PHENO_AGE11==1 & ANY_12MO_3PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    EPD_ATOPIC_ECZEMA_KEEP_2PRESC = if_else(PHENO=="EPD_ATOPIC_ECZEMA" & PHENO_AGE11==1 & ANY_12MO_2PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0)
+    
+    )
+  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_ATOPIC_ECZEMA_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ATOPIC_ECZEMA_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_ATOPIC_ECZEMA_KEEP_ALT == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ATOPIC_ECZEMA_KEEP_ALT == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_ATOPIC_ECZEMA_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ATOPIC_ECZEMA_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_ATOPIC_ECZEMA_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ATOPIC_ECZEMA_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_ATOPIC_ECZEMA") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_ATOPIC_ECZEMA") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+__ALLERGIC_RHINOCONJUNCTIVITIS__
+```{r}
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 2 prescriptions in any 6 month period, at least one over age 11 years and at least one within 12 mo before preg
+    EPD_ALLERGIC_RHINO_KEEP_2PRESC6MO = if_else(PHENO=="EPD_ALLERGIC_RHINO" & PHENO_AGE11==1 & ANY_6MO_2PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    #at least 1 prescriptions over age 11 years and at least one within 12 mo before preg
+    EPD_ALLERGIC_RHINO_KEEP_ANY = if_else(PHENO=="EPD_ALLERGIC_RHINO" & PHENO_AGE11==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    #at least 2 prescriptions in any 6 month period, at least one over age 11 years and before pregnancy
+    EPD_ALLERGIC_RHINO_KEEP_ALT = if_else(PHENO=="EPD_ALLERGIC_RHINO" & PHENO_AGE11==1 & ANY_6MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0)
+    
+    )
+  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_ALLERGIC_RHINO_KEEP_2PRESC6MO == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ALLERGIC_RHINO_KEEP_2PRESC6MO == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_ALLERGIC_RHINO_KEEP_ANY == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ALLERGIC_RHINO_KEEP_ANY == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_ALLERGIC_RHINO_KEEP_ALT == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_ALLERGIC_RHINO_KEEP_ALT == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_ALLERGIC_RHINO") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_ALLERGIC_RHINO") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+
+__HYPERTENSION__
+```{r}
+
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_HYPERTENSION_KEEP_4PRESC = if_else(PHENO=="EPD_HYPERTENSION" & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_HYPERTENSION_KEEP_3PRESC = if_else(PHENO=="EPD_HYPERTENSION" & ANY_12MO_3PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_HYPERTENSION_KEEP_2PRESC = if_else(PHENO=="EPD_HYPERTENSION" & ANY_12MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0)
+    )
+ 
+head(nimats_epd_physical, 500)  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_HYPERTENSION_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_HYPERTENSION_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_HYPERTENSION_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_HYPERTENSION_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_HYPERTENSION_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_HYPERTENSION_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_HYPERTENSION") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_HYPERTENSION") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+
+
+__HYPERTHYROIDISM__
+```{r}
+
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_HYPERTHYROIDISM_KEEP_4PRESC = if_else(PHENO=="EPD_HYPERTHYROIDISM" & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_HYPERTHYROIDISM_KEEP_3PRESC = if_else(PHENO=="EPD_HYPERTHYROIDISM" & ANY_12MO_3PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_HYPERTHYROIDISM_KEEP_2PRESC = if_else(PHENO=="EPD_HYPERTHYROIDISM" & ANY_12MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0)
+    )
+ 
+head(nimats_epd_physical, 500)  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_HYPERTHYROIDISM_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_HYPERTHYROIDISM_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_HYPERTHYROIDISM_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_HYPERTHYROIDISM_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_HYPERTHYROIDISM_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_HYPERTHYROIDISM_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_HYPERTHYROIDISM") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_HYPERTHYROIDISM") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+
+__HYPOTHYROIDISM__
+```{r}
+
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_HYPOTHYROIDISM_KEEP_4PRESC = if_else(PHENO=="EPD_HYPOTHYROIDISM" & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_HYPOTHYROIDISM_KEEP_3PRESC = if_else(PHENO=="EPD_HYPOTHYROIDISM" & ANY_12MO_3PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_HYPOTHYROIDISM_KEEP_2PRESC = if_else(PHENO=="EPD_HYPOTHYROIDISM" & ANY_12MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0)
+    )
+ 
+head(nimats_epd_physical, 500)  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_HYPOTHYROIDISM_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_HYPOTHYROIDISM_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_HYPOTHYROIDISM_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_HYPOTHYROIDISM_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_HYPOTHYROIDISM_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_HYPOTHYROIDISM_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_HYPOTHYROIDISM") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_HYPOTHYROIDISM") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+
+__IRRITABLE BOWEL DISEASE__
+```{r}
+
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_IRR_BOWEL_DIS_KEEP_4PRESC = if_else(PHENO=="EPD_IRR_BOWEL_DIS" & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_IRR_BOWEL_DIS_KEEP_3PRESC = if_else(PHENO=="EPD_IRR_BOWEL_DIS" & ANY_12MO_3PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_IRR_BOWEL_DIS_KEEP_2PRESC = if_else(PHENO=="EPD_IRR_BOWEL_DIS" & ANY_12MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0)
+    )
+ 
+head(nimats_epd_physical, 500)  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_IRR_BOWEL_DIS_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_IRR_BOWEL_DIS_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_IRR_BOWEL_DIS_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_IRR_BOWEL_DIS_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_IRR_BOWEL_DIS_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_IRR_BOWEL_DIS_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_IRR_BOWEL_DIS") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_IRR_BOWEL_DIS") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+
+__MIGRAINE__
+```{r}
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_MIGRAINE_KEEP_4PRESC = if_else(PHENO=="EPD_MIGRAINE" & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_MIGRAINE_KEEP_3PRESC = if_else(PHENO=="EPD_MIGRAINE" & ANY_12MO_3PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_MIGRAINE_KEEP_2PRESC = if_else(PHENO=="EPD_MIGRAINE" & ANY_12MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0)
+    )
+ 
+head(nimats_epd_physical, 500)  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_MIGRAINE_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_MIGRAINE_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_MIGRAINE_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_MIGRAINE_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_MIGRAINE_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_MIGRAINE_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_MIGRAINE") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_MIGRAINE") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+
+__PSORIASIS__
+```{r}
+###??? Query = definition of active not clear in phenome word doc.
+# do we need to consider topical treatments in the last 12 months? or only psoriasis preparations?
+
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_PSORIASIS_KEEP_4PRESC = if_else(PHENO=="EPD_PSORIASIS" & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_PSORIASIS_KEEP_3PRESC = if_else(PHENO=="EPD_PSORIASIS" & ANY_12MO_3PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_PSORIASIS_KEEP_2PRESC = if_else(PHENO=="EPD_PSORIASIS" & ANY_12MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0)
+    )
+ 
+head(nimats_epd_physical, 500)  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_PSORIASIS_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_PSORIASIS_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_PSORIASIS_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_PSORIASIS_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_PSORIASIS_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_PSORIASIS_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_PSORIASIS") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_PSORIASIS") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+__TYPE 1 DIABETES MELLITUS__
+```{r}
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_T1DM_KEEP_4PRESC = if_else(PHENO=="EPD_T1DM" & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_T1DM_KEEP_3PRESC = if_else(PHENO=="EPD_T1DM" & ANY_12MO_3PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_T1DM_KEEP_2PRESC = if_else(PHENO=="EPD_T1DM" & ANY_12MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0)
+    )
+ 
+head(nimats_epd_physical, 500)  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_T1DM_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_T1DM_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_T1DM_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_T1DM_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_T1DM_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_T1DM_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_T1DM") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_T1DM") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+__TYPE 2 DIABETES MELLITUS__
+```{r}
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_T2DM_KEEP_4PRESC = if_else(PHENO=="EPD_T2DM" & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_T2DM_KEEP_3PRESC = if_else(PHENO=="EPD_T2DM" & ANY_12MO_3PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_T2DM_KEEP_2PRESC = if_else(PHENO=="EPD_T2DM" & ANY_12MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0)
+    )
+ 
+head(nimats_epd_physical, 500)  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_T2DM_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_T2DM_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_T2DM_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_T2DM_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_T2DM_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_T2DM_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_T2DM") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_T2DM") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+
+
+__EPILEPSY__
+```{r}
+###??? Query = Do we need to check for X number of scripts in x months or are we defining epilepsy by at least one prescription at any point in time before pregnancy
+
+nimats_epd_physical <- nimats_epd_physical %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_EPILEPSY_KEEP_4PRESC = if_else(PHENO=="EPD_EPILEPSY" & ANY_12MO_4PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_EPILEPSY_KEEP_3PRESC = if_else(PHENO=="EPD_EPILEPSY" & ANY_12MO_3PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_EPILEPSY_KEEP_2PRESC = if_else(PHENO=="EPD_EPILEPSY" & ANY_12MO_2PRESC==1 & PRE_PREG_DISPENSE==1,1,0),
+    EPD_EPILEPSY_KEEP_ANY = if_else(PHENO=="EPD_EPILEPSY" & PRE_PREG_DISPENSE==1,1,0)
+    )
+ 
+head(nimats_epd_physical, 500)  
+```
+
+
+```{r}
+#sanity check
+nimats_epd_physical %>% group_by(EPD_EPILEPSY_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_EPILEPSY_KEEP_4PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_EPILEPSY_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_EPILEPSY_KEEP_3PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+nimats_epd_physical %>% group_by(EPD_EPILEPSY_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_EPILEPSY_KEEP_2PRESC == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(EPD_EPILEPSY_KEEP_ANY == 1) %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+nimats_epd_physical %>% group_by(EPD_EPILEPSY_KEEP_ANY == 1) %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_EPILEPSY") %>% summarise(COUNT = n_distinct(STUDY_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$STUDY_ID)*100)
+
+nimats_epd_physical %>% group_by(PHENO == "EPD_EPILEPSY") %>% summarise(COUNT = n_distinct(PREG_ID),
+                                                                  PERC = COUNT/n_distinct(nimats_epd_physical$PREG_ID)*100)
+```
+###################################
+
+
+```{r}
+nimats_epd_physical_reduce <- nimats_epd_physical %>% select(PREG_ID, starts_with("EPD"))
+names(nimats_epd_physical_reduce)
+```
+
+
+```{r}
+#nimats_epd_physical_reduce[is.na(nimats_epd_physical_reduce)] <- 0
+nimats_epd_physical_reduce <- nimats_epd_physical_reduce %>%
+  mutate(across(starts_with("EPD_"), ~ if_else(is.na(.x), 0, .x)))
+```
+
+
+```{r}
+nimats_epd_physical_reduce <- distinct(nimats_epd_physical_reduce)
+```
+
+```{r}
+n_distinct(nimats_epd_physical_reduce$PREG_ID)
+nrow(nimats_epd_physical_reduce)
+```
+
+```{r}
+nimats_epd_physical_reduce <- nimats_epd_physical_reduce %>%
+  group_by(PREG_ID) %>%
+  summarise(across(starts_with("EPD"), max))
+```
+
+
+```{r}
+write_csv(nimats_epd_physical_reduce, file=paste0("S:/HBS_E062/3. DATA/epd_physical_wide_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+```
+
+
+
+
+############################################################################
+#######                         REMINDERS/ TO DO                     #######
+############################################################################
+
+############################################################################
+
+
+
+######################################
+#######           END          #######
+######################################

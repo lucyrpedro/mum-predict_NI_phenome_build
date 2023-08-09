@@ -1,0 +1,657 @@
+---
+title: "MuM_PreDiCT: EPD Medications"
+output: html_notebook
+---
+
+last updated: 2023.03.20 (Lisa Kent)
+
+This notebook:
+
+
+
+
+```{r}
+if(!require(tidyverse)) install.packages("tidyverse")
+library(tidyverse)
+```
+
+__READ IN LONG FORMAT MENTAL HEALTH PHENOTYPE__
+```{r}
+epd_pheno_mental_health_long <- read_csv("S:/HBS_E062/3. DATA/epd_pheno_mental_health_long_2023.06.06_14.28.csv")
+```
+
+__READ IN NIMATS DATES__
+```{r}
+nimats_dates <- read_csv("S:/HBS_E062/3. DATA/nimats_dates_2023.06.06_14.15.csv")
+```
+
+
+
+__JOIN MENTAL HEALTH PHENOTYPE MEDS TO NIMATS DATES__
+```{r}
+nimats_epd_mental_health <- left_join(nimats_dates, epd_pheno_mental_health_long, by = "STUDY_ID", multiple = "all")
+```
+
+
+```{r}
+nimats_epd_mental_health <- nimats_epd_mental_health %>%
+  arrange(STUDY_ID, PREG_ID, EPD_COMMON_MHD, EPD_SMI_GROUPA, EPD_SMI_GROUPB, EPD_SMI_GROUPC, EPD_ALC_MISUSE_DEPEND, EPD_SUBSTANCE_MISUSE_DEPEND, EPD_NEURODEV_DISORDER, ISSUE_DATE_NONMISS)
+
+head(nimats_epd_mental_health, 100)
+```
+
+
+```{r}
+names(nimats_epd_mental_health)
+```
+
+```{r}
+#IDENTIFY IF PRESCRIPTION DISPENSED PRE-PREGNANCY
+nimats_epd_mental_health <- nimats_epd_mental_health %>%
+  mutate(PRE_PREG_DISPENSE = ifelse(ISSUE_DATE_NONMISS <= LMP_CALC, 1, 0))
+```
+
+
+```{r}
+#FLAG IF MEDICATION ISSUED AFTER AGE 11 
+#(NB - THIS CRITERIA ONLY APPLICABLE TO SOME PHENOTYPES)
+nimats_epd_mental_health <- nimats_epd_mental_health %>%
+  mutate(PHENO_AGE11 = ifelse(ISSUE_DATE_NONMISS >= DATE_AGE11, 1, 0))
+
+head(nimats_epd_mental_health, 100)
+```
+
+
+```{r}
+library(lubridate)
+# FLAG IF ISSUE DATE WITHININ 12MONTHS PRE-PREGNANCY 
+#(NB - "ACTIVE" DEFINITION ONLY APPLICABLE TO SOME PHENOTYPES)
+nimats_epd_mental_health <- nimats_epd_mental_health %>%
+  mutate(DATE_12MONTH = ymd(LMP_CALC) - years(1)) %>%
+  mutate(PHENO_12MONTH_PRE_PREG = ifelse(ISSUE_DATE_NONMISS >= DATE_12MONTH & ISSUE_DATE_NONMISS <= LMP_CALC, 1, 0))
+
+head(nimats_epd_mental_health, 100)
+```
+__SERIOUS MENTAL HEALTH CONDITION__
+```{r}
+#GROUP A
+nimats_epd_smi_a <- nimats_epd_mental_health %>%
+  select(STUDY_ID, PREG_ID, EPD_SMI_GROUPA, ISSUE_DATE_NONMISS, PRE_PREG_DISPENSE, PHENO_AGE11, PHENO_12MONTH_PRE_PREG)
+
+nimats_epd_smi_a <- nimats_epd_smi_a %>%
+  filter(EPD_SMI_GROUPA == 1) %>%
+  arrange(PREG_ID, ISSUE_DATE_NONMISS)
+
+nimats_epd_smi_a <- nimats_epd_smi_a %>%
+  group_by(PREG_ID) %>%
+  mutate(EPD_SMI_GROUPA_DATE_FOURTH_PRESC = lead(ISSUE_DATE_NONMISS,3),
+         EPD_SMI_GROUPA_DATE_THIRD_PRESC = lead(ISSUE_DATE_NONMISS,2),
+         EPD_SMI_GROUPA_DATE_SECOND_PRESC = lead(ISSUE_DATE_NONMISS,1))
+
+
+
+#GROUP B
+nimats_epd_smi_b <- nimats_epd_mental_health %>%
+  select(STUDY_ID, PREG_ID, EPD_SMI_GROUPB, ISSUE_DATE_NONMISS, PRE_PREG_DISPENSE, PHENO_AGE11, PHENO_12MONTH_PRE_PREG)
+
+nimats_epd_smi_b <- nimats_epd_smi_b %>%
+  filter(EPD_SMI_GROUPB == 1) %>%
+  arrange(PREG_ID, ISSUE_DATE_NONMISS)
+
+nimats_epd_smi_b <- nimats_epd_smi_b %>%
+  group_by(PREG_ID) %>%
+  mutate(EPD_SMI_GROUPB_DATE_FOURTH_PRESC = lead(ISSUE_DATE_NONMISS,3),
+         EPD_SMI_GROUPB_DATE_THIRD_PRESC = lead(ISSUE_DATE_NONMISS,2),
+         EPD_SMI_GROUPB_DATE_SECOND_PRESC = lead(ISSUE_DATE_NONMISS,1))
+
+
+#GROUP C
+nimats_epd_smi_c <- nimats_epd_mental_health %>%
+  select(STUDY_ID, PREG_ID, EPD_SMI_GROUPC, ISSUE_DATE_NONMISS, PRE_PREG_DISPENSE, PHENO_AGE11, PHENO_12MONTH_PRE_PREG)
+
+nimats_epd_smi_c <- nimats_epd_smi_c %>%
+  filter(EPD_SMI_GROUPC== 1) %>%
+  arrange(PREG_ID, ISSUE_DATE_NONMISS)
+
+nimats_epd_smi_c <- nimats_epd_smi_c %>%
+  group_by(PREG_ID) %>%
+  mutate(EPD_SMI_GROUPC_DATE_FOURTH_PRESC = lead(ISSUE_DATE_NONMISS,3),
+         EPD_SMI_GROUPC_DATE_THIRD_PRESC = lead(ISSUE_DATE_NONMISS,2),
+         EPD_SMI_GROUPC_DATE_SECOND_PRESC = lead(ISSUE_DATE_NONMISS,1))
+
+```
+
+
+```{r}
+nimats_epd_smi_a %>% filter(is.na(PHENO_AGE11)) %>% head(100)
+```
+
+```{r}
+#GROUPA
+library(lubridate)
+
+nimats_epd_smi_a <- nimats_epd_smi_a %>%
+  mutate(EPD_SMI_GROUPA_FU_PERIOD_4PRESC = as.numeric(EPD_SMI_GROUPA_DATE_FOURTH_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SMI_GROUPA_ANY_12MO_4PRESC = if_else(EPD_SMI_GROUPA_FU_PERIOD_4PRESC <=365 & EPD_SMI_GROUPA_FU_PERIOD_4PRESC >=0, 1, 0))%>%
+  
+  mutate(EPD_SMI_GROUPA_FU_PERIOD_3PRESC = as.numeric(EPD_SMI_GROUPA_DATE_THIRD_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SMI_GROUPA_ANY_12MO_3PRESC = if_else(EPD_SMI_GROUPA_FU_PERIOD_3PRESC <=365 & EPD_SMI_GROUPA_FU_PERIOD_3PRESC >=0, 1, 0)) %>%
+  
+  mutate(EPD_SMI_GROUPA_FU_PERIOD_2PRESC = as.numeric(EPD_SMI_GROUPA_DATE_SECOND_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SMI_GROUPA_ANY_12MO_2PRESC = if_else(EPD_SMI_GROUPA_FU_PERIOD_2PRESC <=365 & EPD_SMI_GROUPA_FU_PERIOD_2PRESC >=0, 1, 0))
+```
+
+```{r}
+lifetime_groupb <- nimats_epd_smi_b %>% pull(PREG_ID)
+lifetime_groupc <- nimats_epd_smi_c %>% pull(PREG_ID)
+#Flag if any lifetime group B or group C
+
+nimats_epd_smi_a <- nimats_epd_smi_a %>%
+  mutate(LIFETIME_GROUPB = if_else(PREG_ID %in% lifetime_groupb,1,0),
+         LIFETIME_GROUPC = if_else(PREG_ID %in% lifetime_groupc,1,0))
+```
+
+
+```{r}
+nimats_epd_smi_a <- nimats_epd_smi_a %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months, age 11+ AND any lifetime receipt of either group B or C
+    EPD_SMI_GROUPA_KEEP_4PRESC = if_else(EPD_SMI_GROUPA_ANY_12MO_4PRESC==1 & PHENO_AGE11==1 & (LIFETIME_GROUPB ==1|LIFETIME_GROUPC==1),1,0),
+    #at least 3 prescriptions in any 12 months, age 11+ AND any lifetime receipt of either group B or C
+    EPD_SMI_GROUPA_KEEP_3PRESC = if_else(EPD_SMI_GROUPA_ANY_12MO_3PRESC==1 & PHENO_AGE11==1 & (LIFETIME_GROUPB ==1|LIFETIME_GROUPC==1),1,0),
+    #at least 2 prescriptions in any 12 months, age 11+ AND any lifetime receipt of either group B or C
+    EPD_SMI_GROUPA_KEEP_2PRESC = if_else(EPD_SMI_GROUPA_ANY_12MO_2PRESC==1 & PHENO_AGE11==1 & (LIFETIME_GROUPB ==1|LIFETIME_GROUPC==1),1,0)
+    )
+
+```
+
+```{r}
+nimats_epd_smi_a_reduce <- nimats_epd_smi_a %>% select(PREG_ID, EPD_SMI_GROUPA_KEEP_4PRESC, EPD_SMI_GROUPA_KEEP_3PRESC, EPD_SMI_GROUPA_KEEP_2PRESC)
+```
+
+```{r}
+nimats_epd_smi_a_reduce[is.na(nimats_epd_smi_a_reduce)] <- 0
+nimats_epd_smi_a_reduce <- distinct(nimats_epd_smi_a_reduce)
+```
+
+```{r}
+nimats_epd_smi_a_wide <- nimats_epd_smi_a_reduce %>%
+  group_by(PREG_ID) %>%
+  summarise(across(starts_with("EPD"), max))
+```
+
+```{r}
+#sanity check
+# there should be same number of rows in wide format as there are distinct preg-id's
+n_distinct(nimats_epd_smi_a_reduce$PREG_ID)
+nrow(nimats_epd_smi_a_reduce)
+n_distinct(nimats_epd_smi_a_wide$PREG_ID)
+nrow(nimats_epd_smi_a_wide)
+```
+```{r}
+nimats_epd_smi_a_wide %>% group_by(EPD_SMI_GROUPA_KEEP_2PRESC,EPD_SMI_GROUPA_KEEP_3PRESC,EPD_SMI_GROUPA_KEEP_4PRESC) %>% count()
+```
+
+
+
+```{r}
+#EPD_SMI_GROUPB
+library(lubridate)
+
+nimats_epd_smi_b <- nimats_epd_smi_b %>%
+  mutate(EPD_SMI_GROUPB_FU_PERIOD_4PRESC = as.numeric(EPD_SMI_GROUPB_DATE_FOURTH_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SMI_GROUPB_ANY_12MO_4PRESC = if_else(EPD_SMI_GROUPB_FU_PERIOD_4PRESC <=365 & EPD_SMI_GROUPB_FU_PERIOD_4PRESC >=0, 1, 0))%>%
+  
+  mutate(EPD_SMI_GROUPB_FU_PERIOD_3PRESC = as.numeric(EPD_SMI_GROUPB_DATE_THIRD_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SMI_GROUPB_ANY_12MO_3PRESC = if_else(EPD_SMI_GROUPB_FU_PERIOD_3PRESC <=365 & EPD_SMI_GROUPB_FU_PERIOD_3PRESC >=0, 1, 0)) %>%
+  
+  mutate(EPD_SMI_GROUPB_FU_PERIOD_2PRESC = as.numeric(EPD_SMI_GROUPB_DATE_SECOND_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SMI_GROUPB_ANY_12MO_2PRESC = if_else(EPD_SMI_GROUPB_FU_PERIOD_2PRESC <=365 & EPD_SMI_GROUPB_FU_PERIOD_2PRESC >=0, 1, 0)) 
+
+
+nimats_epd_smi_b <- nimats_epd_smi_b %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_SMI_GROUPB_KEEP_4PRESC = if_else(EPD_SMI_GROUPB_ANY_12MO_4PRESC==1 & PHENO_AGE11==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_SMI_GROUPB_KEEP_3PRESC = if_else(EPD_SMI_GROUPB_ANY_12MO_3PRESC==1 & PHENO_AGE11==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_SMI_GROUPB_KEEP_2PRESC = if_else(EPD_SMI_GROUPB_ANY_12MO_2PRESC==1 & PHENO_AGE11==1,1,0)
+    )
+
+```
+
+```{r}
+nimats_epd_smi_b_reduce <- nimats_epd_smi_b %>% select(PREG_ID, EPD_SMI_GROUPB_KEEP_4PRESC, EPD_SMI_GROUPB_KEEP_3PRESC, EPD_SMI_GROUPB_KEEP_2PRESC)
+```
+
+```{r}
+nimats_epd_smi_b_reduce[is.na(nimats_epd_smi_b_reduce)] <- 0
+nimats_epd_smi_b_reduce <- distinct(nimats_epd_smi_b_reduce)
+```
+
+```{r}
+nimats_epd_smi_b_wide <- nimats_epd_smi_b_reduce %>%
+  group_by(PREG_ID) %>%
+  summarise(across(starts_with("EPD"), max))
+```
+
+```{r}
+#sanity check
+# there should be same number of rows in wide format as there are distinct preg-id's
+n_distinct(nimats_epd_smi_b_reduce$PREG_ID)
+nrow(nimats_epd_smi_b_reduce)
+n_distinct(nimats_epd_smi_b_wide$PREG_ID)
+nrow(nimats_epd_smi_b_wide)
+```
+
+
+
+```{r}
+#EPD_SMI_GROUPC
+library(lubridate)
+
+nimats_epd_smi_c <- nimats_epd_smi_c %>%
+  mutate(EPD_SMI_GROUPC_FU_PERIOD_4PRESC = as.numeric(EPD_SMI_GROUPC_DATE_FOURTH_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SMI_GROUPC_ANY_12MO_4PRESC = if_else(EPD_SMI_GROUPC_FU_PERIOD_4PRESC <=365 & EPD_SMI_GROUPC_FU_PERIOD_4PRESC >=0, 1, 0))%>%
+  
+  mutate(EPD_SMI_GROUPC_FU_PERIOD_3PRESC = as.numeric(EPD_SMI_GROUPC_DATE_THIRD_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SMI_GROUPC_ANY_12MO_3PRESC = if_else(EPD_SMI_GROUPC_FU_PERIOD_3PRESC <=365 & EPD_SMI_GROUPC_FU_PERIOD_3PRESC >=0, 1, 0)) %>%
+  
+  mutate(EPD_SMI_GROUPC_FU_PERIOD_2PRESC = as.numeric(EPD_SMI_GROUPC_DATE_SECOND_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SMI_GROUPC_ANY_12MO_2PRESC = if_else(EPD_SMI_GROUPC_FU_PERIOD_2PRESC <=365 & EPD_SMI_GROUPC_FU_PERIOD_2PRESC >=0, 1, 0))
+
+nimats_epd_smi_c <- nimats_epd_smi_c %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months
+    EPD_SMI_GROUPC_KEEP_4PRESC = if_else(EPD_SMI_GROUPC_ANY_12MO_4PRESC==1 & PHENO_AGE11==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 3 prescriptions in any 12 months
+    EPD_SMI_GROUPC_KEEP_3PRESC = if_else(EPD_SMI_GROUPC_ANY_12MO_3PRESC==1 & PHENO_AGE11==1 & PRE_PREG_DISPENSE==1,1,0),
+    #at least 2 prescriptions in any 12 months
+    EPD_SMI_GROUPC_KEEP_2PRESC = if_else(EPD_SMI_GROUPC_ANY_12MO_2PRESC==1 & PHENO_AGE11==1 & PRE_PREG_DISPENSE==1,1,0)
+    )
+
+```
+
+
+
+
+```{r}
+nimats_epd_smi_c_reduce <- nimats_epd_smi_c %>% select(PREG_ID, EPD_SMI_GROUPC_KEEP_4PRESC, EPD_SMI_GROUPC_KEEP_3PRESC, EPD_SMI_GROUPC_KEEP_2PRESC)
+```
+
+
+```{r}
+nimats_epd_smi_c_reduce[is.na(nimats_epd_smi_c_reduce)] <- 0
+nimats_epd_smi_c_reduce <- distinct(nimats_epd_smi_c_reduce)
+```
+
+
+```{r}
+nimats_epd_smi_c_wide <- nimats_epd_smi_c_reduce %>%
+  group_by(PREG_ID) %>%
+  summarise(across(starts_with("EPD"), max))
+```
+
+
+```{r}
+#sanity check
+# there should be same number of rows in wide format as there are distinct preg-id's
+n_distinct(nimats_epd_smi_c_reduce$PREG_ID)
+nrow(nimats_epd_smi_c_reduce)
+n_distinct(nimats_epd_smi_c_wide$PREG_ID)
+nrow(nimats_epd_smi_c_wide)
+```
+
+
+__MERGE ALL SMI FLAGS__
+```{r}
+nimats_epd_smi_all_wide <- full_join(nimats_epd_smi_a_wide, nimats_epd_smi_b_wide, by = "PREG_ID")
+nimats_epd_smi_all_wide <- full_join(nimats_epd_smi_all_wide, nimats_epd_smi_c_wide, by = "PREG_ID")
+```
+
+
+
+
+__COMMON MENTAL HEALTH CONDITION__
+```{r}
+#COMMON MENTAL HEALTH CONDITION
+#Calculate the date of the 4th, 3rd, 2nd prescription
+nimats_epd_cmhd <- nimats_epd_mental_health %>%
+  select(PREG_ID, EPD_COMMON_MHD, ISSUE_DATE_NONMISS, PRE_PREG_DISPENSE, PHENO_AGE11, PHENO_12MONTH_PRE_PREG)
+
+nimats_epd_cmhd <- nimats_epd_cmhd %>%
+  filter(EPD_COMMON_MHD == 1) %>%
+  arrange(PREG_ID, ISSUE_DATE_NONMISS)
+
+nimats_epd_cmhd <- nimats_epd_cmhd %>%
+  group_by(PREG_ID) %>%
+  mutate(EPD_COMMON_MHD_DATE_FOURTH_PRESC = lead(ISSUE_DATE_NONMISS,3),
+         EPD_COMMON_MHD_DATE_THIRD_PRESC = lead(ISSUE_DATE_NONMISS,2),
+         EPD_COMMON_MHD_DATE_SECOND_PRESC = lead(ISSUE_DATE_NONMISS,1))
+
+```
+
+
+```{r}
+library(lubridate)
+
+#EPD_COMMON_MHD
+nimats_epd_cmhd <- nimats_epd_cmhd %>%
+  mutate(EPD_COMMON_MHD_FU_PERIOD_4PRESC = as.numeric(EPD_COMMON_MHD_DATE_FOURTH_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_COMMON_MHD_ANY_12MO_4PRESC = if_else(EPD_COMMON_MHD_FU_PERIOD_4PRESC <=365 & EPD_COMMON_MHD_FU_PERIOD_4PRESC >=0, 1, 0))%>%
+  
+  mutate(EPD_COMMON_MHD_FU_PERIOD_3PRESC = as.numeric(EPD_COMMON_MHD_DATE_THIRD_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_COMMON_MHD_ANY_12MO_3PRESC = if_else(EPD_COMMON_MHD_FU_PERIOD_3PRESC <=365 & EPD_COMMON_MHD_FU_PERIOD_3PRESC >=0, 1, 0)) %>%
+  
+  mutate(EPD_COMMON_MHD_FU_PERIOD_2PRESC = as.numeric(EPD_COMMON_MHD_DATE_SECOND_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_COMMON_MHD_ANY_12MO_2PRESC = if_else(EPD_COMMON_MHD_FU_PERIOD_2PRESC <=365 & EPD_COMMON_MHD_FU_PERIOD_2PRESC >=0, 1, 0)) %>%
+  mutate(EPD_COMMON_MHD_ANY_6MO_2PRESC = if_else(EPD_COMMON_MHD_FU_PERIOD_2PRESC <=183 & EPD_COMMON_MHD_FU_PERIOD_2PRESC >=0, 1, 0))
+
+
+
+nimats_epd_cmhd <- nimats_epd_cmhd %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months AND at least one in 12 months pre-preg
+    EPD_COMMON_MHD_KEEP_4PRESC = if_else(EPD_COMMON_MHD_ANY_12MO_4PRESC==1 & PHENO_AGE11==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    #at least 3 prescriptions in any 12 months AND at least one in 12 months pre-preg
+    EPD_COMMON_MHD_KEEP_3PRESC = if_else(EPD_COMMON_MHD_ANY_12MO_3PRESC==1 & PHENO_AGE11==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    #at least 2 prescriptions in any 12 months AND at least one in 12 months pre-preg
+    EPD_COMMON_MHD_KEEP_2PRESC = if_else(EPD_COMMON_MHD_ANY_12MO_2PRESC==1 & PHENO_AGE11==1 & PHENO_12MONTH_PRE_PREG==1,1,0)
+    )
+
+```
+
+```{r}
+nimats_epd_cmhd_reduce <- nimats_epd_cmhd %>% select(PREG_ID, EPD_COMMON_MHD_KEEP_4PRESC, EPD_COMMON_MHD_KEEP_3PRESC, EPD_COMMON_MHD_KEEP_2PRESC)
+```
+
+```{r}
+nimats_epd_cmhd_reduce[is.na(nimats_epd_cmhd_reduce)] <- 0
+nimats_epd_cmhd_reduce <- distinct(nimats_epd_cmhd_reduce)
+```
+
+```{r}
+nimats_epd_cmhd_wide <- nimats_epd_cmhd_reduce %>%
+  group_by(PREG_ID) %>%
+  summarise(across(starts_with("EPD"), max))
+```
+
+```{r}
+#sanity check
+# there should be same number of rows in wide format as there are distinct preg-id's
+n_distinct(nimats_epd_cmhd_reduce$PREG_ID)
+nrow(nimats_epd_cmhd_reduce)
+n_distinct(nimats_epd_cmhd_wide$PREG_ID)
+nrow(nimats_epd_cmhd_wide)
+```
+
+
+__ALCOHOL MISUSE/DEPENDENCY__
+```{r}
+nimats_epd_alc <- nimats_epd_mental_health %>%
+  select(PREG_ID, EPD_ALC_MISUSE_DEPEND, ISSUE_DATE_NONMISS, PRE_PREG_DISPENSE, PHENO_AGE11, PHENO_12MONTH_PRE_PREG)
+
+```
+
+
+```{r}
+#Calculate the date of the 4th, 3rd, 2nd prescription
+
+nimats_epd_alc <- nimats_epd_alc %>%
+  filter(EPD_ALC_MISUSE_DEPEND == 1) %>%
+  arrange(PREG_ID, ISSUE_DATE_NONMISS)
+
+nimats_epd_alc <- nimats_epd_alc %>%
+  group_by(PREG_ID) %>%
+  mutate(EPD_ALC_DATE_FOURTH_PRESC = lead(ISSUE_DATE_NONMISS,3),
+         EPD_ALC_DATE_THIRD_PRESC = lead(ISSUE_DATE_NONMISS,2),
+         EPD_ALC_DATE_SECOND_PRESC = lead(ISSUE_DATE_NONMISS,1))
+
+```
+
+
+```{r}
+library(lubridate)
+nimats_epd_alc <- nimats_epd_alc %>%
+  mutate(EPD_ALC_FU_PERIOD_4PRESC = as.numeric(EPD_ALC_DATE_FOURTH_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_ALC_ANY_12MO_4PRESC = if_else(EPD_ALC_FU_PERIOD_4PRESC <=365 & EPD_ALC_FU_PERIOD_4PRESC >=0, 1, 0))%>%
+  
+  mutate(EPD_ALC_FU_PERIOD_3PRESC = as.numeric(EPD_ALC_DATE_THIRD_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_ALC_ANY_12MO_3PRESC = if_else(EPD_ALC_FU_PERIOD_3PRESC <=365 & EPD_ALC_FU_PERIOD_3PRESC >=0, 1, 0)) %>%
+  
+  mutate(EPD_ALC_FU_PERIOD_2PRESC = as.numeric(EPD_ALC_DATE_SECOND_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_ALC_ANY_12MO_2PRESC = if_else(EPD_ALC_FU_PERIOD_2PRESC <=365 & EPD_ALC_FU_PERIOD_2PRESC >=0, 1, 0)) %>%
+  mutate(EPD_ALC_ANY_6MO_2PRESC = if_else(EPD_ALC_FU_PERIOD_2PRESC <=183 & EPD_ALC_FU_PERIOD_2PRESC >=0, 1, 0))
+
+
+
+nimats_epd_alc <- nimats_epd_alc %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months AND after age 11years (not considering preceding 12mo)
+    EPD_ALC_KEEP_4PRESC = if_else(EPD_ALC_ANY_12MO_4PRESC==1 & PHENO_AGE11==1,1,0),
+    #at least 3 prescriptions in any 12 months AND after age 11years (not considering preceding 12mo)
+    EPD_ALC_KEEP_3PRESC = if_else(EPD_ALC_ANY_12MO_3PRESC==1 & PHENO_AGE11==1,1,0),
+    #at least 2 prescriptions in any 12 months AND after age 11years (not considering preceding 12mo)
+    EPD_ALC_KEEP_2PRESC = if_else(EPD_ALC_ANY_12MO_2PRESC==1 & PHENO_AGE11==1,1,1,0)
+    )
+
+```
+
+```{r}
+nimats_epd_alc_reduce <- nimats_epd_alc %>% select(PREG_ID, EPD_ALC_KEEP_4PRESC, EPD_ALC_KEEP_3PRESC, EPD_ALC_KEEP_2PRESC)
+```
+
+```{r}
+nimats_epd_alc_reduce[is.na(nimats_epd_alc_reduce)] <- 0
+nimats_epd_alc_reduce <- distinct(nimats_epd_alc_reduce)
+```
+
+```{r}
+nimats_epd_alc_wide <- nimats_epd_alc_reduce %>%
+  group_by(PREG_ID) %>%
+  summarise(across(starts_with("EPD"), max))
+```
+
+```{r}
+#sanity check
+# there should be same number of rows in wide format as there are distinct preg-id's
+n_distinct(nimats_epd_alc_reduce$PREG_ID)
+nrow(nimats_epd_alc_reduce)
+n_distinct(nimats_epd_alc_wide$PREG_ID)
+nrow(nimats_epd_alc_wide)
+```
+
+
+
+__SUBSTANCE MISUSE/DEPENDENCY__
+```{r}
+nimats_epd_substance <- nimats_epd_mental_health %>%
+  select(PREG_ID, EPD_SUBSTANCE_MISUSE_DEPEND, ISSUE_DATE_NONMISS, PRE_PREG_DISPENSE, PHENO_AGE11, PHENO_12MONTH_PRE_PREG)
+
+```
+
+
+```{r}
+#Calculate the date of the 4th, 3rd, 2nd prescription
+
+nimats_epd_substance <- nimats_epd_substance %>%
+  filter(EPD_SUBSTANCE_MISUSE_DEPEND == 1) %>%
+  arrange(PREG_ID, ISSUE_DATE_NONMISS)
+
+nimats_epd_substance <- nimats_epd_substance %>%
+  group_by(PREG_ID) %>%
+  mutate(EPD_SUBSTANCE_DATE_FOURTH_PRESC = lead(ISSUE_DATE_NONMISS,3),
+         EPD_SUBSTANCE_DATE_THIRD_PRESC = lead(ISSUE_DATE_NONMISS,2),
+         EPD_SUBSTANCE_DATE_SECOND_PRESC = lead(ISSUE_DATE_NONMISS,1))
+
+```
+
+
+```{r}
+library(lubridate)
+nimats_epd_substance <- nimats_epd_substance %>%
+  mutate(EPD_SUBSTANCE_FU_PERIOD_4PRESC = as.numeric(EPD_SUBSTANCE_DATE_FOURTH_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SUBSTANCE_ANY_12MO_4PRESC = if_else(EPD_SUBSTANCE_FU_PERIOD_4PRESC <=365 & EPD_SUBSTANCE_FU_PERIOD_4PRESC >=0, 1, 0))%>%
+  
+  mutate(EPD_SUBSTANCE_FU_PERIOD_3PRESC = as.numeric(EPD_SUBSTANCE_DATE_THIRD_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SUBSTANCE_ANY_12MO_3PRESC = if_else(EPD_SUBSTANCE_FU_PERIOD_3PRESC <=365 & EPD_SUBSTANCE_FU_PERIOD_3PRESC >=0, 1, 0)) %>%
+  
+  mutate(EPD_SUBSTANCE_FU_PERIOD_2PRESC = as.numeric(EPD_SUBSTANCE_DATE_SECOND_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_SUBSTANCE_ANY_12MO_2PRESC = if_else(EPD_SUBSTANCE_FU_PERIOD_2PRESC <=365 & EPD_SUBSTANCE_FU_PERIOD_2PRESC >=0, 1, 0)) %>%
+  mutate(EPD_SUBSTANCE_ANY_6MO_2PRESC = if_else(EPD_SUBSTANCE_FU_PERIOD_2PRESC <=183 & EPD_SUBSTANCE_FU_PERIOD_2PRESC >=0, 1, 0))
+
+
+
+nimats_epd_substance <- nimats_epd_substance %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months AND after age 11years (not considering preceding 12mo)
+    EPD_SUBSTANCE_KEEP_4PRESC = if_else(EPD_SUBSTANCE_ANY_12MO_4PRESC==1 & PHENO_AGE11==1,1,0),
+    #at least 3 prescriptions in any 12 months AND after age 11years (not considering preceding 12mo)
+    EPD_SUBSTANCE_KEEP_3PRESC = if_else(EPD_SUBSTANCE_ANY_12MO_3PRESC==1 & PHENO_AGE11==1,1,0),
+    #at least 2 prescriptions in any 12 months AND after age 11years (not considering preceding 12mo)
+    EPD_SUBSTANCE_KEEP_2PRESC = if_else(EPD_SUBSTANCE_ANY_12MO_2PRESC==1 & PHENO_AGE11==1,1,0)
+    )
+
+```
+
+```{r}
+nimats_epd_substance_reduce <- nimats_epd_substance %>% select(PREG_ID, EPD_SUBSTANCE_KEEP_4PRESC, EPD_SUBSTANCE_KEEP_3PRESC, EPD_SUBSTANCE_KEEP_2PRESC)
+```
+
+```{r}
+nimats_epd_substance_reduce[is.na(nimats_epd_substance_reduce)] <- 0
+nimats_epd_substance_reduce <- distinct(nimats_epd_substance_reduce)
+```
+
+```{r}
+nimats_epd_substance_wide <- nimats_epd_substance_reduce %>%
+  group_by(PREG_ID) %>%
+  summarise(across(starts_with("EPD"), max))
+```
+
+```{r}
+#sanity check
+# there should be same number of rows in wide format as there are distinct preg-id's
+n_distinct(nimats_epd_substance_reduce$PREG_ID)
+nrow(nimats_epd_substance_reduce)
+n_distinct(nimats_epd_substance_wide$PREG_ID)
+nrow(nimats_epd_substance_wide)
+```
+
+
+
+__NEURODEVELOPMENTAL DISORDER__
+```{r}
+nimats_epd_neurodev <- nimats_epd_mental_health %>%
+  select(PREG_ID, EPD_NEURODEV_DISORDER, ISSUE_DATE_NONMISS, PRE_PREG_DISPENSE, PHENO_AGE11, PHENO_12MONTH_PRE_PREG)
+
+```
+
+
+```{r}
+#Calculate the date of the 4th, 3rd, 2nd prescription
+
+nimats_epd_neurodev <- nimats_epd_neurodev %>%
+  filter(EPD_NEURODEV_DISORDER == 1) %>%
+  arrange(PREG_ID, ISSUE_DATE_NONMISS)
+
+nimats_epd_neurodev <- nimats_epd_neurodev %>%
+  group_by(PREG_ID) %>%
+  mutate(EPD_NEURODEV_DATE_FOURTH_PRESC = lead(ISSUE_DATE_NONMISS,3),
+         EPD_NEURODEV_DATE_THIRD_PRESC = lead(ISSUE_DATE_NONMISS,2),
+         EPD_NEURODEV_DATE_SECOND_PRESC = lead(ISSUE_DATE_NONMISS,1))
+
+```
+
+
+```{r}
+library(lubridate)
+nimats_epd_neurodev <- nimats_epd_neurodev %>%
+  mutate(EPD_NEURODEV_FU_PERIOD_4PRESC = as.numeric(EPD_NEURODEV_DATE_FOURTH_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_NEURODEV_ANY_12MO_4PRESC = if_else(EPD_NEURODEV_FU_PERIOD_4PRESC <=365 & EPD_NEURODEV_FU_PERIOD_4PRESC >=0, 1, 0))%>%
+  
+  mutate(EPD_NEURODEV_FU_PERIOD_3PRESC = as.numeric(EPD_NEURODEV_DATE_THIRD_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_NEURODEV_ANY_12MO_3PRESC = if_else(EPD_NEURODEV_FU_PERIOD_3PRESC <=365 & EPD_NEURODEV_FU_PERIOD_3PRESC >=0, 1, 0)) %>%
+  
+  mutate(EPD_NEURODEV_FU_PERIOD_2PRESC = as.numeric(EPD_NEURODEV_DATE_SECOND_PRESC - ISSUE_DATE_NONMISS)) %>%
+  mutate(EPD_NEURODEV_ANY_12MO_2PRESC = if_else(EPD_NEURODEV_FU_PERIOD_2PRESC <=365 & EPD_NEURODEV_FU_PERIOD_2PRESC >=0, 1, 0)) %>%
+  mutate(EPD_NEURODEV_ANY_6MO_2PRESC = if_else(EPD_NEURODEV_FU_PERIOD_2PRESC <=183 & EPD_NEURODEV_FU_PERIOD_2PRESC >=0, 1, 0))
+
+
+
+nimats_epd_neurodev <- nimats_epd_neurodev %>%
+  mutate(
+    #at least 4 prescriptions in any 12 months (not considering age 11+ or preceding 12mo)
+    EPD_NEURODEV_KEEP_4PRESC = if_else(EPD_NEURODEV_ANY_12MO_4PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    #at least 3 prescriptions in any 12 months (not considering age 11+ or preceding 12mo)
+    EPD_NEURODEV_KEEP_3PRESC = if_else(EPD_NEURODEV_ANY_12MO_3PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0),
+    #at least 2 prescriptions in any 12 months (not considering age 11+ or preceding 12mo)
+    EPD_NEURODEV_KEEP_2PRESC = if_else(EPD_NEURODEV_ANY_12MO_2PRESC==1 & PHENO_12MONTH_PRE_PREG==1,1,0)
+    )
+
+```
+
+```{r}
+nimats_epd_neurodev_reduce <- nimats_epd_neurodev %>% select(PREG_ID, EPD_NEURODEV_KEEP_4PRESC, EPD_NEURODEV_KEEP_3PRESC, EPD_NEURODEV_KEEP_2PRESC)
+```
+
+```{r}
+nimats_epd_neurodev_reduce[is.na(nimats_epd_neurodev_reduce)] <- 0
+nimats_epd_neurodev_reduce <- distinct(nimats_epd_neurodev_reduce)
+```
+
+```{r}
+nimats_epd_neurodev_wide <- nimats_epd_neurodev_reduce %>%
+  group_by(PREG_ID) %>%
+  summarise(across(starts_with("EPD"), max))
+```
+
+```{r}
+#sanity check
+# there should be same number of rows in wide format as there are distinct preg-id's
+n_distinct(nimats_epd_neurodev_reduce$PREG_ID)
+nrow(nimats_epd_neurodev_reduce)
+n_distinct(nimats_epd_neurodev_wide$PREG_ID)
+nrow(nimats_epd_neurodev_wide)
+```
+
+
+
+
+```{r}
+#saving work during test phase
+
+# write_csv(nimats_epd_smi_all_wide, "S:/HBS_E062/3. DATA/ARCHIVE/nimats_epd_smi_all_wide.csv")
+# write_csv(nimats_epd_cmhd_wide, "S:/HBS_E062/3. DATA/ARCHIVE/nimats_epd_mental_health_precursor.csv")
+# write_csv(nimats_epd_alc_wide, "S:/HBS_E062/3. DATA/ARCHIVE/nimats_epd_alc_wide.csv")
+# write_csv(nimats_epd_substance_wide, "S:/HBS_E062/3. DATA/ARCHIVE/nimats_epd_substance_wide.csv")
+# write_csv(nimats_epd_neurodev_wide, "S:/HBS_E062/3. DATA/ARCHIVE/nimats_epd_neurodev_wide.csv")
+```
+
+
+
+```{r}
+#saving final datasets
+
+write_csv(nimats_epd_smi_all_wide, file=paste0("S:/HBS_E062/3. DATA/nimats_epd_smi_all_wide_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+write_csv(nimats_epd_cmhd_wide, file=paste0("S:/HBS_E062/3. DATA/nimats_epd_cmhd_wide_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+write_csv(nimats_epd_alc_wide, file=paste0("S:/HBS_E062/3. DATA/nimats_epd_alc_wide_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+write_csv(nimats_epd_substance_wide, file=paste0("S:/HBS_E062/3. DATA/nimats_epd_substance_wide_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+write_csv(nimats_epd_neurodev_wide, file=paste0("S:/HBS_E062/3. DATA/nimats_epd_neurodev_wide_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+```
+
+
+
+
+############################################################################
+#######                         REMINDERS/ TO DO                     #######
+############################################################################
+
+############################################################################
+
+
+
+######################################
+#######           END          #######
+######################################

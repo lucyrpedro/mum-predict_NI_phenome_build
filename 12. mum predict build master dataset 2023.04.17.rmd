@@ -1,0 +1,383 @@
+---
+title: "MuM_PreDiCT"
+output: html_notebook
+---
+
+last updated: 2023.04.05 (Lisa Kent)
+
+This notebook:
+* reads in previously deduplicated (but not fully cleaned) pregnancy level datasets
+* joins into master pregnancy level data set using NIMATS general details as population spine
+
+
+
+
+```{r}
+if(!require(tidyverse)) install.packages("tidyverse")
+library(tidyverse)
+```
+
+```{r}
+#NIMATS datasets
+# pregnancy level general details
+nimats_gen_preg_level <- read_csv("S:/HBS_E062/3. DATA/nimats_preg_level_2023.06.06_11.30.csv")
+
+#dates relating to each pregnancy
+nimats_dates <- read_csv("S:/HBS_E062/3. DATA/nimats_dates_2023.06.06_14.15.csv")
+
+#past medical history as recorded by midwife (usually at booking)
+nimats_pmh <- read_csv("S:/HBS_E062/3. DATA/nimats_pmh_preg_level_2023.06.06_12.13.csv")
+
+#previous obstetric history as recorded by midwife (usually at booking)
+nimats_obshx <- read_csv("S:/HBS_E062/3. DATA/nimats_obshx_preg_level_2023.06.06_13.11.csv")
+
+#delivery details (n.b. other details may be held in infant level dataset)
+nimats_dd <- read_csv("S:/HBS_E062/3. DATA/nimats_dd_preg_level_2023.06.06_12.10.csv")
+
+#specified conditions identified from text mining (only a few that are not covered by PMHx variable codes)
+nimats_cond <- read_csv("S:/HBS_E062/3. DATA/nimats_cond_preg_level_2023.06.06_13.13.csv")
+
+```
+
+
+```{r}
+#Physical Health EPD dataset
+epd_physical <- read_csv("S:/HBS_E062/3. DATA/epd_physical_wide_2023.06.07_14.36.csv")
+```
+
+
+```{r}
+#Mental Health EPD datasets
+epd_cmhd <- read_csv("S:/HBS_E062/3. DATA/nimats_epd_cmhd_wide_2023.06.07_14.53.csv")
+epd_smi <- read_csv("S:/HBS_E062/3. DATA/nimats_epd_smi_all_wide_2023.06.07_14.53.csv")
+epd_alcohol <- read_csv("S:/HBS_E062/3. DATA/nimats_epd_alc_wide_2023.06.07_14.53.csv")
+epd_substance <- read_csv("S:/HBS_E062/3. DATA/nimats_epd_substance_wide_2023.06.07_14.53.csv")
+epd_neurodev <- read_csv("S:/HBS_E062/3. DATA/nimats_epd_neurodev_wide_2023.06.07_14.53.csv")
+```
+
+
+```{r}
+#conditions flagged from ICD10 codes in PAS
+pas <- read_csv("S:/HBS_E062/3. DATA/pas_wide_2023.06.07_15.00.csv")
+```
+
+
+```{r}
+colnames(nimats_gen_preg_level)
+colnames(nimats_dates)
+```
+
+
+
+
+```{r}
+#remove variables that are duplicated between nimats_gen and nimats_dates
+mumpredict_preg_level_master <- nimats_gen_preg_level %>% select(-STUDY_ID, -DOB_MONTH, -DOB_YEAR, -LMP, -EDC, -EDC_CONFIRMED_ULTRASOUND, -ACTUAL_EDC, -GEST_AT_BOOKING_DAYS, -GEST_AT_DELIVERY_DAYS, -AGE_AT_BIRTH)
+```
+
+```{r}
+names(mumpredict_preg_level_master)
+```
+
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, nimats_dates, by="PREG_ID")
+```
+```{r}
+names(nimats_pmh)
+nimats_pmh <- nimats_pmh %>% select(-DOB_MONTH, -DOB_YEAR)
+```
+
+
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, nimats_pmh, by="PREG_ID")
+```
+
+```{r}
+names(nimats_obshx)
+
+nimats_obshx <- nimats_obshx %>% select(-`NA`)
+```
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, nimats_obshx, by="PREG_ID")
+```
+
+
+
+```{r}
+names(nimats_dd)
+
+nimats_dd %>% group_by(SURGERY_DESC) %>% count() #empty variable therefore remove
+
+nimats_dd <- nimats_dd %>% select(-DOB_MONTH, -DOB_YEAR, -SURGERY_CODE, -SURGERY_DESC)
+```
+
+
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, nimats_dd, by="PREG_ID")
+```
+
+```{r}
+names(nimats_cond)
+```
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, nimats_cond, by="PREG_ID")
+```
+
+
+
+```{r}
+names(epd_physical)
+```
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, epd_physical, by="PREG_ID")
+```
+
+
+```{r}
+names(epd_cmhd)
+```
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, epd_cmhd, by="PREG_ID")
+```
+
+```{r}
+names(epd_smi)
+```
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, epd_smi, by="PREG_ID")
+```
+
+
+```{r}
+names(epd_alcohol)
+```
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, epd_alcohol, by="PREG_ID")
+```
+
+
+```{r}
+names(epd_substance)
+```
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, epd_substance, by="PREG_ID")
+```
+
+
+```{r}
+names(epd_neurodev)
+```
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, epd_neurodev, by="PREG_ID")
+```
+
+
+
+
+```{r}
+names(pas)
+```
+
+```{r}
+mumpredict_preg_level_master <- left_join(mumpredict_preg_level_master, pas, by="PREG_ID")
+```
+
+
+
+
+__MULTIMORBIDITY PHENOME FLAGS - COMBINE EPD AND PAS DEFINED PHENOME VARIABLES__
+```{r}
+# NOTE - NI EPD data has missing prescriptions if they were not able to be automatically scanned
+# Alternative flags were created for comparison using 1, 2 or 3 instead of 4 scripts in any one year, and dropping the 1 year pre-preg requirement
+# Below we only use the epd flags that satisfy the mum-predict phenome definitions
+
+      
+
+
+
+mumpredict_preg_level_master <- mumpredict_preg_level_master %>% mutate(
+  
+  # PHYSICAL HEALTH CONDITIONS
+  FLAG_ASTHMA_4PRESC = if_else(EPD_ASTHMA_KEEP_4PRESC == 1 | PAS_ASTHMA ==1, 1, 0),                     
+  FLAG_ASTHMA_3PRESC = if_else(EPD_ASTHMA_KEEP_3PRESC == 1 | PAS_ASTHMA ==1, 1, 0),
+  FLAG_ASTHMA_2PRESC = if_else(EPD_ASTHMA_KEEP_2PRESC == 1 | PAS_ASTHMA ==1, 1, 0),
+  FLAG_ASTHMA_ALT = if_else(EPD_ASTHMA_KEEP_ALT == 1 | PAS_ASTHMA ==1, 1, 0),
+  
+  FLAG_ECZEMA_4PRESC = if_else(EPD_ATOPIC_ECZEMA_KEEP_4PRESC == 1 | PAS_ATOPIC_ECZEMA ==1, 1, 0),       
+  FLAG_ECZEMA_3PRESC = if_else(EPD_ATOPIC_ECZEMA_KEEP_3PRESC == 1 | PAS_ATOPIC_ECZEMA ==1, 1, 0),
+  FLAG_ECZEMA_2PRESC = if_else(EPD_ATOPIC_ECZEMA_KEEP_2PRESC == 1 | PAS_ATOPIC_ECZEMA ==1, 1, 0),
+  FLAG_ECZEMA_ALT = if_else(EPD_ATOPIC_ECZEMA_KEEP_ALT == 1 | PAS_ATOPIC_ECZEMA ==1, 1, 0),
+  
+  FLAG_ALLERGIC_RHINO_2PRESC6MO = if_else(EPD_ALLERGIC_RHINO_KEEP_2PRESC6MO == 1 | PAS_ALLERGIC_RHINITIS ==1, 1, 0),     
+  FLAG_ALLERGIC_RHINO_ANY = if_else(EPD_ALLERGIC_RHINO_KEEP_ANY == 1 | PAS_ALLERGIC_RHINITIS ==1, 1, 0),
+  FLAG_ALLERGIC_RHINO_ALT = if_else(EPD_ALLERGIC_RHINO_KEEP_ALT == 1 | PAS_ALLERGIC_RHINITIS ==1, 1, 0),
+  
+  
+  
+  FLAG_HYPERTENSION_4PRESC = if_else(EPD_HYPERTENSION_KEEP_4PRESC == 1 |PAS_HYPERTENSION == 1, 1, 0),       
+  FLAG_HYPERTENSION_3PRESC = if_else(EPD_HYPERTENSION_KEEP_3PRESC == 1 |PAS_HYPERTENSION == 1, 1, 0),
+  FLAG_HYPERTENSION_2PRESC = if_else(EPD_HYPERTENSION_KEEP_2PRESC == 1 |PAS_HYPERTENSION == 1, 1, 0),
+  
+  
+  FLAG_THYROID_4PRESC = if_else(EPD_HYPERTHYROIDISM_KEEP_4PRESC == 1 | EPD_HYPOTHYROIDISM_KEEP_4PRESC == 1 | PAS_THYROID_DISORDER == 1, 1, 0),
+  FLAG_THYROID_3PRESC = if_else(EPD_HYPERTHYROIDISM_KEEP_3PRESC == 1 | EPD_HYPOTHYROIDISM_KEEP_3PRESC == 1 | PAS_THYROID_DISORDER == 1, 1, 0),
+  FLAG_THYROID_2PRESC = if_else(EPD_HYPERTHYROIDISM_KEEP_2PRESC == 1 | EPD_HYPOTHYROIDISM_KEEP_2PRESC == 1 | PAS_THYROID_DISORDER == 1, 1, 0),
+  
+  
+  FLAG_IBD_4PRESC = if_else(EPD_IRR_BOWEL_DIS_KEEP_4PRESC == 1 | PAS_IRRITABLE_BOWEL_SYNDROME == 1, 1, 0),       
+  FLAG_IBD_3PRESC = if_else(EPD_IRR_BOWEL_DIS_KEEP_3PRESC == 1 | PAS_IRRITABLE_BOWEL_SYNDROME == 1, 1, 0),
+  FLAG_IBD_2PRESC = if_else(EPD_IRR_BOWEL_DIS_KEEP_2PRESC == 1 | PAS_IRRITABLE_BOWEL_SYNDROME == 1, 1, 0),
+  
+  
+  FLAG_MIGRAINE_4PRESC = if_else(EPD_MIGRAINE_KEEP_4PRESC == 1 | PAS_MIGRAINE == 1, 1, 0),
+  FLAG_MIGRAINE_3PRESC = if_else(EPD_MIGRAINE_KEEP_3PRESC == 1 | PAS_MIGRAINE == 1, 1, 0),
+  FLAG_MIGRAINE_2PRESC = if_else(EPD_MIGRAINE_KEEP_2PRESC == 1 | PAS_MIGRAINE == 1, 1, 0),
+  
+  
+  FLAG_PSORIASIS_4PRESC = if_else(EPD_PSORIASIS_KEEP_4PRESC == 1 |PAS_PSORIASIS == 1, 1, 0),
+  FLAG_PSORIASIS_3PRESC = if_else(EPD_PSORIASIS_KEEP_3PRESC == 1 |PAS_PSORIASIS == 1, 1, 0),
+  FLAG_PSORIASIS_2PRESC = if_else(EPD_PSORIASIS_KEEP_2PRESC == 1 |PAS_PSORIASIS == 1, 1, 0),
+  
+  
+  FLAG_DIABETES_4PRESC = if_else(EPD_T1DM_KEEP_4PRESC == 1 | EPD_T2DM_KEEP_4PRESC == 1 | PAS_DIABETES_MELLITUS == 1, 1, 0),
+  FLAG_DIABETES_3PRESC = if_else(EPD_T1DM_KEEP_3PRESC == 1 | EPD_T2DM_KEEP_3PRESC == 1 | PAS_DIABETES_MELLITUS == 1, 1, 0),
+  FLAG_DIABETES_2PRESC = if_else(EPD_T1DM_KEEP_2PRESC == 1 | EPD_T2DM_KEEP_2PRESC == 1 | PAS_DIABETES_MELLITUS == 1, 1, 0),
+  
+  
+  FLAG_EPILEPSY_4PRESC = if_else(EPD_EPILEPSY_KEEP_4PRESC == 1 | PAS_EPILEPSY == 1, 1, 0),
+  FLAG_EPILEPSY_3PRESC = if_else(EPD_EPILEPSY_KEEP_3PRESC == 1 | PAS_EPILEPSY == 1, 1, 0),
+  FLAG_EPILEPSY_2PRESC = if_else(EPD_EPILEPSY_KEEP_2PRESC == 1 | PAS_EPILEPSY == 1, 1, 0),
+  FLAG_EPILEPSY_ANY = if_else(EPD_EPILEPSY_KEEP_ANY == 1 | PAS_EPILEPSY == 1, 1, 0),
+  
+  
+  FLAG_BRONCHIECTASIS = PAS_BRONCHIECTASIS,
+  FLAG_OTHER_DERMATOLOGY_CONDITIONS = PAS_OTHER_DERMATOLOGY_CONDITIONS,
+  FLAG_INFLAMMATORY_BOWEL_DISEASE = PAS_INFLAMMATORY_BOWEL_DISEASE,
+  FLAG_SOMATOFORM_DISORDER = PAS_SOMATOFORM_DISORDER,      
+  FLAG_VERTEBRAL_DISORDER = PAS_VERTEBRAL_DISORDER,  
+  FLAG_CHRONIC_BACK_PAIN = PAS_CHRONIC_BACK_PAIN,
+  FLAG_INFERTILITY = PAS_INFERTILITY,
+  FLAG_ENDOMETROSIS = PAS_ENDOMETROSIS,
+  FLAG_DIABETIC_EYE_DISEASE = PAS_DIABETIC_EYE_DISEASE,
+  FLAG_UROLITHIASIS_KIDNEY_STONES = PAS_UROLITHIASIS_KIDNEY_STONES,
+  FLAG_EHLERS_DANLOS_SYNDROME_TYPE_3 = PAS_EHLERS_DANLOS_SYNDROME_TYPE_3,
+  FLAG_INFLAMMATORY_ARTHRITIS =  PAS_INFLAMMATORY_ARTHRITIS,
+  FLAG_CHRONIC_KIDNEY_DISEASE_CKD_3_5 = PAS_CHRONIC_KIDNEY_DISEASE_CKD_3_5,
+  FLAG_SARCOIDOSIS = PAS_SARCOIDOSIS,
+  FLAG_SEVERE_BLINDNESS = PAS_SEVERE_BLINDNESS,
+  FLAG_GALL_STONES = PAS_GALL_STONES,
+  FLAG_DEAFNESS = PAS_DEAFNESS,
+  FLAG_PEPTIC_ULCER_DISEASE = PAS_PEPTIC_ULCER_DISEASE,
+  FLAG_HYPERPARATHYROIDISM = PAS_HYPERPARATHYROIDISM,
+  FLAG_POLYCYSTIC_OVARIAN_SYNDROME = PAS_POLYCYSTIC_OVARIAN_SYNDROME,
+  FLAG_LEIOMYOMA = PAS_LEIOMYOMA,
+  FLAG_PULMONARY_EMBOLISM = PAS_PULMONARY_EMBOLISM,
+  FLAG_OTHER_HEADACHES = PAS_OTHER_HEADACHES,
+  FLAG_PERIPHERAL_NEUROPATHY = PAS_PERIPHERAL_NEUROPATHY,
+  FLAG_PITUITARY_TUMOUR = PAS_PITUITARY_TUMOUR,
+  FLAG_OBSTRUCTIVE_SLEEP_APNOEA = PAS_OBSTRUCTIVE_SLEEP_APNOEA,
+  FLAG_INFLAMMATORY_EYE_DISEASE = PAS_INFLAMMATORY_EYE_DISEASE,
+  FLAG_SYSTEMIC_LUPUS_ERYTHEMATOSUS = PAS_SYSTEMIC_LUPUS_ERYTHEMATOSUS,
+  FLAG_ALL_OTHER_CANCERS = PAS_ALL_OTHER_CANCERS,
+  FLAG_SPONDYLOARTHRITIS = PAS_SPONDYLOARTHRITIS,
+  FLAG_EATING_DISORDER = PAS_EATING_DISORDER,
+  FLAG_COELIAC_DISEASE = PAS_COELIAC_DISEASE,
+  FLAG_PRIMARY_THROMBOCYTOPAENIA = PAS_PRIMARY_THROMBOCYTOPAENIA,
+  FLAG_OSTEOARTHRITIS = PAS_OSTEOARTHRITIS,
+  FLAG_PERNICIOUS_ANAEMIA = PAS_PERNICIOUS_ANAEMIA,
+  FLAG_CATARACT = PAS_CATARACT,
+  FLAG_IDIOPATHIC_INTRACRANIAL_HYPERTENSION = PAS_IDIOPATHIC_INTRACRANIAL_HYPERTENSION,
+  FLAG_CONGENITAL_HEART_DISEASE = PAS_CONGENITAL_HEART_DISEASE,
+  FLAG_MULTIPLE_SCLEROSIS = PAS_MULTIPLE_SCLEROSIS,
+  FLAG_STROKE = PAS_STROKE,
+  FLAG_BREAST_CANCER = PAS_BREAST_CANCER,
+  FLAG_ISCHEMIC_HEART_DISEASE_MYOCARDIAL_INFRACTION = PAS_ISCHEMIC_HEART_DISEASE_MYOCARDIAL_INFRACTION,
+  FLAG_HEART_FAILURE = PAS_HEART_FAILURE,
+  FLAG_SOLID_ORGAN_TRANSPLANT = PAS_SOLID_ORGAN_TRANSPLANT,
+  FLAG_VENOUS_THROMBOEMBOLISM = PAS_VENOUS_THROMBOEMBOLISM,
+  FLAG_ATRIAL_FIBRILLATION = PAS_ATRIAL_FIBRILLATION,
+  FLAG_CARDIOMYOPATHY = PAS_CARDIOMYOPATHY,
+  FLAG_HAEMOPHILIA = PAS_HAEMOPHILIA,
+  FLAG_CHRONIC_LIVER_DISEASE = PAS_CHRONIC_LIVER_DISEASE,
+  FLAG_CHRONIC_OBSTRUCTIVE_PULMONARY_DISEASE = PAS_CHRONIC_OBSTRUCTIVE_PULMONARY_DISEASE,
+  FLAG_SCOLIOSIS = PAS_SCOLIOSIS,
+  FLAG_OSTEOPOROSIS = PAS_OSTEOPOROSIS,
+  FLAG_SPINA_BIFIDA = PAS_SPINA_BIFIDA,
+  FLAG_ADRENAL_TUMOUR = PAS_ADRENAL_TUMOUR,
+  FLAG_VALVULAR_HEART_DISEASE = PAS_VALVULAR_HEART_DISEASE,
+  FLAG_PULMONARY_FIBROSIS_INSTERTITIAL_LUNG_DISEASE = PAS_PULMONARY_FIBROSIS_INSTERTITIAL_LUNG_DISEASE,
+  FLAG_RETINAL_DETACHMENT = PAS_RETINAL_DETACHMENT,
+  FLAG_PRIMARY_SYSTEMIC_VASCULITIS = PAS_PRIMARY_SYSTEMIC_VASCULITIS,
+  FLAG_CYSTIC_FIBROSIS = PAS_CYSTIC_FIBROSIS,
+  FLAG_TURNERS_SYNDROME = PAS_TURNERS_SYNDROME,
+  FLAG_ISCHEMIC_HEART_DISEASE_MYOCARDIAL_INFARCTION = PAS_ISCHEMIC_HEART_DISEASE_MYOCARDIAL_INFARCTION,
+  FLAG_AUTOIMMUNE_SKIN_DISEASE = PAS_AUTOIMMUNE_SKIN_DISEASE,
+  FLAG_HIV_AIDS = PAS_HIV_AIDS,
+  FLAG_MARFANS_SYNDROME = PAS_MARFANS_SYNDROME,
+  FLAG_SICKLE_CELL_ANAEMIA = PAS_SICKLE_CELL_ANAEMIA,
+  FLAG_PULMONARY_HYPERTENSION = PAS_PULMONARY_HYPERTENSION,
+
+  
+  # MENTAL HEALTH CONDITIONS
+  FLAG_COMMON_MHD_EPD = if_else(EPD_COMMON_MHD_KEEP_4PRESC == 1 & PAS_ANXIETY == 0 & PAS_DEPRESSION == 0, 1, 0), #counts if medications AND no ICD10
+  FLAG_ANXIETY = PAS_ANXIETY,
+  FLAG_DEPRESSION = PAS_DEPRESSION, 
+  FLAG_SMI = if_else(EPD_SMI_GROUPA_KEEP_4PRESC == 1 | #this includes requirement of any lifetime group b or c medication
+                       EPD_SMI_GROUPB_KEEP_4PRESC == 1 |
+                       EPD_SMI_GROUPC_KEEP_4PRESC == 1 |
+                       PAS_PSYCHOSES == 1 | 
+                       PAS_BIPOLAR_DISORDER_AFFECTIVE_PSYCHOSIS == 1 |
+                       PAS_SCHIZOPHRENIA_NON_AFFECTIVE_PSYCHOSIS == 1, 1, 0),
+  FLAG_ALCOHOL = if_else(EPD_ALC_KEEP_4PRESC ==1 | PAS_HISTORY_OF_ALCOHOL_USE_DISORDER_MISUSE_DEPENDENCE == 1, 1, 0),
+  FLAG_SUBSTANCE = if_else(EPD_SUBSTANCE_KEEP_4PRESC == 1 | PAS_HISTORY_OF_SUBSTANCE_MISUSE == 1, 1, 0),
+  FLAG_EATING_DISORDER = PAS_EATING_DISORDER,
+  FLAG_NEURODEV = if_else(EPD_NEURODEV_KEEP_4PRESC == 1 | PAS_NEURODEVELOPMENTAL_DISORDER == 1, 1, 0),
+  FLAG_OTHER_MH = PAS_OTHER_MENTAL_HEALTH_CONDITIONS
+  
+  
+  
+)
+                                              
+       
+```
+
+
+```{r}
+#change NA to zero in binary flags for each condition
+mumpredict_preg_level_master <- mumpredict_preg_level_master %>%
+  mutate(across(starts_with("FLAG"), ~ if_else(is.na(.x), 0, .x)))
+```
+
+
+
+
+```{r}
+write_csv(mumpredict_preg_level_master, file=paste0("S:/HBS_E062/3. DATA/mumpredict_preg_level_master_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+
+```
+
+
+
+
+
+############################################################################
+#######                         REMINDERS/ TO DO                     #######
+############################################################################
+
+############################################################################
+
+
+
+######################################
+#######           END          #######
+######################################

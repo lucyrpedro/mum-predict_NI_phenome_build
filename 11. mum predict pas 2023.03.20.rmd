@@ -1,0 +1,344 @@
+---
+title: "MuM_PreDiCT: PAS"
+output: html_notebook
+---
+
+last updated: 2023.03.20 (Lisa Kent)
+
+This notebook:
+* reads in raw PAS table from database
+* links ICD-10 codes in PAS to defined/named mum-predict phenotypes 
+* creates instance level wide DF (i.e. one row per individual/admission date with one-hot dummy variable for each phenotype name)
+
+################
+
+
+```{r}
+if(!require(tidyverse)) install.packages("tidyverse")
+library(tidyverse)
+```
+
+__Lode odbc (Open Database Connectivity) package__
+```{r}
+library(odbc)
+```
+
+__Declare connection to database__
+```{r}
+con <- dbConnect(odbc::odbc(), "hirusql3", timeout = 10)
+```
+
+
+
+__Admissions Data__
+```{r}
+pas <- dbGetQuery(con,"Select * from [HDRNIHBS_E062].[PAS_1]")
+```
+
+```{r}
+colnames(pas)
+```
+
+```{r}
+colnames(pas) <- toupper(colnames(pas))
+```
+
+
+```{r}
+glimpse(pas)
+#there is trailing white space for some variables
+```
+
+```{r}
+pas <- pas %>% 
+  mutate(across(where(is.character), str_trim))
+
+glimpse(pas)
+```
+
+```{r}
+# re-order data by study_id ascending 
+pas<-pas[order(pas$STUDY_ID),]
+head(pas, 20)
+```
+
+```{r}
+n_distinct(pas$STUDY_ID)
+n_distinct(pas$STUDY_ID, pas$ADMISSION_DATE)
+```
+
+
+
+```{r}
+pas_icd <- pas %>%
+  select(STUDY_ID, ADMISSION_DATE, contains("DIAGNOSIS"))
+
+head(pas_icd, 20)
+```
+
+```{r}
+#confirming that all diagnosis variables have been used at least once
+pas_icd %>% group_by(SECONDARY_DIAGNOSIS_15) %>% count()
+```
+
+
+```{r}
+#create long df of ICD10 codes (with study-id and admission date)
+pas_icd_long <- pas_icd %>%
+  pivot_longer(cols = PRIMARY_DIAGNOSIS_CODE:SECONDARY_DIAGNOSIS_15, names_to = "VAR", values_to = "ICD10_CODE")
+head(pas_icd_long, 20)
+nrow(pas_icd_long)
+```
+
+```{r}
+#remove rows where no ICD10 code recorded
+pas_icd_long_narm <- pas_icd_long[!is.na(pas_icd_long$ICD10_CODE), ]
+head(pas_icd_long_narm, 20)
+nrow(pas_icd_long_narm)
+```
+
+__READ IN ICD-10 CODE vs HEALTH CONDITION__
+```{r}
+# Four characters
+icd_list_4char <- read_csv("S:/HBS_E062/2. CODE/code lists/ICD10 codes 2023.02.27.csv")
+```
+
+```{r}
+# Three characters
+icd_list_3char <- read_csv("S:/HBS_E062/2. CODE/code lists/ICD10 codes 3char 2023.02.27.csv")
+```
+
+
+```{r}
+#sanity check (are all names using same spelling / terminology across 4 and 3 char lists?)
+icd_list_4char$PHENOTYPE<-toupper(icd_list_4char$PHENOTYPE)
+icd_list_4char<-icd_list_4char[order(icd_list_4char$PHENOTYPE, icd_list_4char$ICD10_CODE),]
+icd_list_4char %>% distinct(PHENOTYPE)
+
+icd_list_3char$PHENOTYPE<-toupper(icd_list_3char$PHENOTYPE)
+icd_list_3char<-icd_list_3char[order(icd_list_3char$PHENOTYPE, icd_list_3char$ICD10_CODE),]
+icd_list_3char %>% distinct(PHENOTYPE)
+```
+
+
+```{r}
+# replace certain characters in phenotype name with "_" in preparation for using these to create column names
+
+icd_list_4char$PHENOTYPE <- gsub("\\)", "", icd_list_4char$PHENOTYPE)
+icd_list_4char$PHENOTYPE <- gsub(" |&|\\/|\\,|\\(|\\)|\\-", "_", icd_list_4char$PHENOTYPE)
+icd_list_4char$PHENOTYPE <- gsub("__|___", "_", icd_list_4char$PHENOTYPE)
+icd_list_4char$PHENOTYPE <- paste0("PAS_", icd_list_4char$PHENOTYPE)
+icd_list_4char %>% distinct(PHENOTYPE)
+
+
+icd_list_3char$PHENOTYPE <- gsub("\\)", "", icd_list_3char$PHENOTYPE)
+icd_list_3char$PHENOTYPE <- gsub(" |&|\\/|\\,|\\(|\\)|\\-", "_", icd_list_3char$PHENOTYPE)
+icd_list_3char$PHENOTYPE <- gsub("__|___", "_", icd_list_3char$PHENOTYPE)
+icd_list_3char$PHENOTYPE <- paste0("PAS_", icd_list_3char$PHENOTYPE)
+icd_list_3char %>% distinct(PHENOTYPE)
+
+```
+
+
+```{r}
+# some ICD10 codes in PAS are greater than 5 characters (including fullstop)
+# e.g. "M24.24" - doesnt exist in the ICD10 browser or mum-predict phenome
+# e.g. "A09.9 D" - doesnt exist in the ICD10 browser  or mum-predict phenome - many have this extra " D" at end
+
+# for 4 characters ICD-10 code we extract the first 5 chars (i.e. XXX.X)
+pas_icd_long_narm$ICD10_CODE_4CHAR <- substr(pas_icd_long_narm$ICD10_CODE, 1, 5)
+
+# for 3 characters ICD-10 code we extract the first 3 chars (i.e. XXX)
+pas_icd_long_narm$ICD10_CODE_3CHAR <- substr(pas_icd_long_narm$ICD10_CODE, 1, 3)
+```
+
+```{r}
+# for each 4 character ICD10 code in PAS, join to named phenotype from mum-predict phenotype-code list
+icd_list_4char <- icd_list_4char %>% rename(PHENO_4CHAR = PHENOTYPE)
+pas_icd_long_narm <- left_join(pas_icd_long_narm, icd_list_4char, by=c("ICD10_CODE_4CHAR" = "ICD10_CODE"))
+```
+
+
+```{r}
+# for each 3 character ICD10 code in PAS, join to named phenotype from mum-predict phenotype-code list
+icd_list_3char <- icd_list_3char %>% rename(PHENO_3CHAR = PHENOTYPE)
+pas_icd_long_narm <- left_join(pas_icd_long_narm, icd_list_3char, by=c("ICD10_CODE_3CHAR" = "ICD10_CODE"))
+```
+
+```{r}
+pas_icd_long_narm <- pas_icd_long_narm %>% mutate(
+  PAS_PHENO = if_else(!is.na(PHENO_4CHAR), PHENO_4CHAR, PHENO_3CHAR)
+)
+```
+
+
+
+
+```{r}
+#inspect codes not picked up
+pas_icd_long_narm %>% 
+  filter(is.na(PAS_PHENO)) %>%
+  group_by(ICD10_CODE)%>%
+  count()
+
+#count instances
+pas_icd_long_narm %>% group_by(PAS_PHENO) %>% count()
+
+#count individuals
+pas_icd_long_narm %>% group_by(PAS_PHENO) %>% summarise(COUNT = n_distinct(STUDY_ID))
+
+```
+
+
+
+
+
+
+```{r}
+#remove rows where no phenotype is recorded
+pas_icd_long_narm <- pas_icd_long_narm[!is.na(pas_icd_long_narm$PAS_PHENO), ]
+```
+
+```{r}
+write_csv(pas_icd_long_narm, file=paste0("S:/HBS_E062/3. DATA/pas_icd_long_narm_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+#below for use during testing phase
+#write_csv(pas_icd_long_narm, "S:/HBS_E062/3. DATA/ARCHIVE/pas_icd_long_narm.csv")
+```
+
+
+
+```{r}
+pas_icd_long_narm_summary <- pas_icd_long_narm %>%
+  select(STUDY_ID, ADMISSION_DATE, PAS_PHENO) %>%
+  group_by(STUDY_ID, ADMISSION_DATE, PAS_PHENO) %>%
+  summarise(COUNT = n())
+```
+```{r}
+pas_icd_long_narm_summary <- pas_icd_long_narm_summary %>% ungroup()
+```
+
+
+```{r}
+pas_icd_long_narm_summary$COUNT[pas_icd_long_narm_summary$COUNT>0] <- 1
+```
+
+#######################################################
+
+__NIMATS dates__
+```{r}
+#Read in NIMATS dates
+
+nimats_dates <- read_csv("S:/HBS_E062/3. DATA/nimats_dates_2023.06.06_14.15.csv")
+```
+
+__Join PAS and NIMATS Dates__
+```{r}
+pas_dates_long <- left_join(pas_icd_long_narm_summary, nimats_dates, by="STUDY_ID")
+```
+
+```{r}
+pas_dates_long <- pas_dates_long %>%
+  mutate(PAS_PHENO_AGE11 = ifelse(ADMISSION_DATE >= DATE_AGE11, 1, 0),    #age 11+?
+         PAS_PHENO_PRE_PREG = ifelse(ADMISSION_DATE <= LMP_CALC, 1, 0)    #pre-pregnancy?
+         )
+```
+
+
+
+```{r}
+#some diagnoses can only be retained if they are present at a time point that falls after the mother is aged 11 years
+age_11plus <- c("PAS_ATOPIC_ECZEMA", "PAS_ALLERGIC_RHINITIS", "PAS_OTHER_HEADACHES", "PAS_ASTHMA")
+pas_dates_long <- pas_dates_long %>%
+  mutate(PAS_PHENO_KEEP = if_else(
+    PAS_PHENO_PRE_PREG == 1 & (!(PAS_PHENO %in% age_11plus) | (PAS_PHENO %in% age_11plus & PAS_PHENO_AGE11==1)), 1, 0)
+  )
+ 
+```
+
+
+```{r}
+#sanity check
+pas_dates_long %>%
+  filter(PAS_PHENO %in% age_11plus) %>%
+  head(100)
+
+pas_dates_long %>%
+  filter(PAS_PHENO_AGE11 == 0) %>%
+  head(100)
+```
+
+
+```{r}
+pas_dates_long <- pas_dates_long %>% filter(PAS_PHENO_KEEP == 1)
+```
+
+```{r}
+names(pas_dates_long)
+pas_dates_long <- pas_dates_long %>% ungroup()
+pas_dates_long <- pas_dates_long %>% select(PREG_ID, ADMISSION_DATE, PAS_PHENO, PAS_PHENO_KEEP)
+names(pas_dates_long)
+```
+
+
+
+```{r}
+pas_dates_wide <- pas_dates_long %>%
+  pivot_wider(names_from = PAS_PHENO,
+              values_from = PAS_PHENO_KEEP,
+              values_fill = list(PAS_PHENO_KEEP = 0))
+```
+
+
+```{r}
+nrow(pas_dates_wide)
+pas_dates_wide <- distinct(pas_dates_wide)
+
+nrow(pas_dates_wide)
+n_distinct(pas_dates_wide$PREG_ID)
+#some pregnancies have more than one row
+```
+
+```{r}
+#we want to keep any flagged condition within the same pregnancy
+#so within each pregnancy we retain the max value (i.e. the 1 one) for any condition
+pas_dates_wide[is.na(pas_dates_wide)] <- 0
+
+pas_dates_wide_reduce <- pas_dates_wide %>%
+  group_by(PREG_ID) %>%
+  summarise(across(starts_with("PAS"), max))
+
+nrow(pas_dates_wide)
+n_distinct(pas_dates_wide$PREG_ID)
+nrow(pas_dates_wide_reduce)
+n_distinct(pas_dates_wide_reduce$PREG_ID)
+
+```
+```{r}
+#sanity check
+pas_dates_wide %>% summarise(across(starts_with("PAS"), sum, na.rm = T))
+pas_dates_wide %>% group_by(PAS_ALL_OTHER_CANCERS) %>% summarise(COUNT = n_distinct(PREG_ID))
+pas_dates_wide %>% group_by(PAS_CHRONIC_LIVER_DISEASE) %>% summarise(COUNT = n_distinct(PREG_ID))
+pas_dates_wide_reduce %>% group_by(PAS_CYSTIC_FIBROSIS) %>% summarise(COUNT = n_distinct(PREG_ID))
+
+pas_dates_wide_reduce %>% summarise(across(starts_with("PAS"), sum, na.rm = T))
+pas_dates_wide_reduce %>% group_by(PAS_ALL_OTHER_CANCERS) %>% summarise(COUNT = n_distinct(PREG_ID))
+pas_dates_wide_reduce %>% group_by(PAS_CHRONIC_LIVER_DISEASE) %>% summarise(COUNT = n_distinct(PREG_ID))
+pas_dates_wide_reduce %>% group_by(PAS_CYSTIC_FIBROSIS) %>% summarise(COUNT = n_distinct(PREG_ID))
+
+
+```
+
+
+```{r}
+
+write_csv(pas_dates_wide_reduce, file=paste0("S:/HBS_E062/3. DATA/pas_wide_", format(lubridate::now(), "%Y.%m.%d_%H.%M"),".csv"))
+
+# saving to ARCHIVE while in test phase
+#write_csv(pas_dates_wide_reduce, "S:/HBS_E062/3. DATA/ARCHIVE/pas_wide.csv")
+
+```
+
+
+######################################
+#######           END          #######
+######################################
