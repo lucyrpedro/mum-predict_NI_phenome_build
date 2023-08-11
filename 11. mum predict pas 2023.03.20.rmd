@@ -177,7 +177,7 @@ pas_icd_long_narm <- pas_icd_long_narm %>% mutate(
 ```{r}
 #inspect codes not picked up
 pas_icd_long_narm %>% 
-  filter(is.na(PAS_PHENO)) %>%
+  filter(!is.na(PAS_PHENO)) %>%
   group_by(ICD10_CODE)%>%
   count()
 
@@ -316,9 +316,9 @@ n_distinct(pas_dates_wide_reduce$PREG_ID)
 ```{r}
 #sanity check
 pas_dates_wide %>% summarise(across(starts_with("PAS"), sum, na.rm = T))
-pas_dates_wide %>% group_by(PAS_ALL_OTHER_CANCERS) %>% summarise(COUNT = n_distinct(PREG_ID))
-pas_dates_wide %>% group_by(PAS_CHRONIC_LIVER_DISEASE) %>% summarise(COUNT = n_distinct(PREG_ID))
-pas_dates_wide_reduce %>% group_by(PAS_CYSTIC_FIBROSIS) %>% summarise(COUNT = n_distinct(PREG_ID))
+pas_dates_wide %>% group_by(PAS_ALL_OTHER_CANCERS) %>% summarise(COUNT == n_distinct(PREG_ID))
+pas_dates_wide %>% group_by(PAS_CHRONIC_LIVER_DISEASE) %>% summarise(COUNT == n_distinct(PREG_ID))
+pas_dates_wide_reduce %>% group_by(PAS_CYSTIC_FIBROSIS) %>% summarise(COUNT == n_distinct(PREG_ID))
 
 pas_dates_wide_reduce %>% summarise(across(starts_with("PAS"), sum, na.rm = T))
 pas_dates_wide_reduce %>% group_by(PAS_ALL_OTHER_CANCERS) %>% summarise(COUNT = n_distinct(PREG_ID))
